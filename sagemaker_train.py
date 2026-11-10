@@ -62,13 +62,17 @@ def _train(args, model_dir: Path, output_dir: Path, checkpoint_dir: Path) -> Non
     model_dir.mkdir(parents=True, exist_ok=True)
     runs = []
     provenance = {"synthetic_only": True, "seed": args.seed,
+                  "validation_seed": args.validation_seed,
                   "num_tables_per_prior": args.num_tables, "archives": [],
                   "config": {"steps_per_arm": args.steps,
                              "effective_batch_size": args.batch_size,
                              "microbatch_size": args.microbatch_size,
                              "gradient_accumulation_steps": args.batch_size // args.microbatch_size,
                              "context_max": args.max_context,
-                             "query_rows": 8}}
+                             "query_rows": 8,
+                             "validate_every": args.validate_every,
+                             "validation_tables_per_prior": args.validation_tables,
+                             "validation_batches_per_context": args.validation_batches_per_context}}
     _write_json(output_dir / "job_config.json", provenance["config"])
     for prior in ("generic", "mixture"):
         replay = scratch / f"{prior}_{args.num_tables}.h5"
@@ -97,17 +101,46 @@ def _train(args, model_dir: Path, output_dir: Path, checkpoint_dir: Path) -> Non
         })
         _write_json(output_dir / "generated_prior_provenance.json", provenance)
         print(f"Validated {prior}: {n} synthetic tasks, {count_maternal} maternal; SHA-256 {generation['sha256']}", flush=True)
+        # A disjoint synthetic task stream for evaluating convergence.
+        # Its generation seed differs from the training replay seed, and no
+        # validation tasks are used for optimizer updates.
+        val_replay = scratch / f"{prior}_validation_{args.validation_tables}.h5"
+        val_generation = create_replay(
+            val_replay, num_tables=args.validation_tables,
+            seed=args.validation_seed, prior=prior,
+            min_rows=args.min_rows, max_rows=args.max_rows,
+            min_features=5, max_features=args.max_features,
+            maternal_probability=0.7,
+        )
+        if not val_generation["fully_generated"]:
+            raise RuntimeError(f"Incomplete synthetic validation archive: {val_replay}")
+        provenance["archives"][-1]["validation"] = {
+            "tasks": args.validation_tables, "seed": args.validation_seed,
+            "sha256": val_generation["sha256"], "synthetic_only": True,
+            "disjoint_seed_stream": True,
+        }
+        _write_json(output_dir / "generated_prior_provenance.json", provenance)
         for tier in ("tiny", "base"):
             ckpt = checkpoint_dir / f"{tier}_{prior}.pt"
             result = train_replay(
                 replay, ckpt, tier=tier, steps=args.steps,
                 batch_size=args.batch_size, microbatch_size=args.microbatch_size, seed=args.seed,
                 device=args.device, max_context=args.max_context,
-                query_rows=8, save_every=max(1, args.steps // 10),
+                query_rows=8, save_every=args.validate_every,
+                validation_path=val_replay, validate_every=args.validate_every,
+                validation_batches_per_context=args.validation_batches_per_context,
+                validation_seed=args.validation_seed,
                 resume=ckpt.exists(),
             )
-            for src in (ckpt, ckpt.with_name(ckpt.stem + ".inference.pt")):
+            for src in (ckpt, ckpt.with_name(ckpt.stem + ".inference.pt"),
+                        ckpt.with_name(ckpt.stem + ".best.inference.pt")):
+                if src.exists():
+                    shutil.copy2(src, model_dir / src.name)
+            for src in checkpoint_dir.glob(f"{ckpt.stem}.step*.inference.pt"):
                 shutil.copy2(src, model_dir / src.name)
+            history=ckpt.with_name(ckpt.stem + ".validation.json")
+            if history.exists():
+                shutil.copy2(history, output_dir / history.name)
             result["prior"] = prior
             result["status"] = "complete"
             runs.append(result)
@@ -120,7 +153,11 @@ def _train(args, model_dir: Path, output_dir: Path, checkpoint_dir: Path) -> Non
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=("benchmark", "train"), required=True)
-    parser.add_argument("--steps", type=int, default=2500)
+    parser.add_argument("--steps", type=int, default=5000)
+    parser.add_argument("--validate-every", type=int, default=250)
+    parser.add_argument("--validation-tables", type=int, default=512)
+    parser.add_argument("--validation-seed", type=int, default=20271008)
+    parser.add_argument("--validation-batches-per-context", type=int, default=2)
     parser.add_argument("--num-tables", type=int, default=200000)
     parser.add_argument("--batch-size", type=int, default=32,
                         help="Effective tasks per optimizer step")
@@ -132,7 +169,7 @@ def main() -> None:
     parser.add_argument("--min-rows", type=int, default=32)
     parser.add_argument("--max-rows", type=int, default=576)
     parser.add_argument("--max-features", type=int, default=16)
-    parser.add_argument("--scratch-dir", default="/tmp/nanomaternalpfn-priors")
+    parser.add_argument("--scratch-dir", default="/opt/ml/nanomaternalpfn-priors")
     args = parser.parse_args()
     if args.steps < 1 or args.num_tables < 1 or args.batch_size < 1:
         raise ValueError("steps, num-tables, batch-size must be positive")
@@ -140,6 +177,10 @@ def main() -> None:
         raise ValueError("microbatch-size must be a positive divisor of batch-size")
     if args.max_context < 16:
         raise ValueError("max-context must be at least 16")
+    if args.validation_seed == args.seed:
+        raise ValueError("Validation and training generation seeds must differ")
+    if args.validate_every < 1 or args.validation_tables < 2 or args.validation_batches_per_context < 1:
+        raise ValueError("Invalid validation configuration")
     model_dir = Path(os.getenv("SM_MODEL_DIR", "artifacts/sagemaker/model"))
     # SageMaker archives non-model artifacts only from /opt/ml/output/data.
     # SM_OUTPUT_DIR can point to its parent /opt/ml/output in some toolkit versions.
