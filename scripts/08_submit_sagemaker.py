@@ -18,7 +18,9 @@ def main():
     p.add_argument("--bucket",default="sagemaker-us-east-1-355119164071")
     p.add_argument("--prefix",default="nanomaternalpfn/phase2")
     p.add_argument("--role-arn",default="arn:aws:iam::355119164071:role/SageMakerExecutionRole")
-    p.add_argument("--steps",type=int,default=2500)
+    p.add_argument("--steps",type=int,default=5000)
+    p.add_argument("--validate-every",type=int,default=250)
+    p.add_argument("--validation-tables",type=int,default=512)
     p.add_argument("--batch-size",type=int,default=32,help="Effective batch size for full training")
     p.add_argument("--microbatch-size",type=int,default=8,help="Per-forward batch size for accumulated training")
     p.add_argument("--num-tables",type=int,default=200000)
@@ -28,6 +30,8 @@ def main():
         p.error("batch-size, steps and num-tables must be positive")
     if args.microbatch_size<1 or args.batch_size%args.microbatch_size:
         p.error("microbatch-size must be a positive divisor of batch-size")
+    if args.validate_every<1 or args.validation_tables<2:
+        p.error("validate-every must be positive and validation-tables >= 2")
     uri=f"s3://{args.bucket}/{args.prefix.strip('/')}"
     print(json.dumps({
         "mode":args.mode,"will_launch_billable_gpu":args.submit,
@@ -38,6 +42,9 @@ def main():
         "microbatch_size":args.microbatch_size,
         "gradient_accumulation_steps":args.batch_size//args.microbatch_size,
         "task_presentations_per_model":args.steps*args.batch_size,
+        "validation_interval_steps":args.validate_every,
+        "validation_tables_per_prior":args.validation_tables,
+        "selection":"best held-out synthetic loss; all 5000 steps run unless interrupted",
         "checkpoint_s3_uri":uri+"/checkpoints",
         "note":"SageMaker writes final model and results to output prefix. No prior archives are uploaded automatically."
     },indent=2))
@@ -78,6 +85,8 @@ def main():
             "batch-size":args.batch_size if args.mode=="train" else args.microbatch_size,
             "microbatch-size":args.microbatch_size,
             "num-tables":args.num_tables,
+            "validate-every":args.validate_every,
+            "validation-tables":args.validation_tables,
             "device":"cuda",
         },
         environment={"OMP_NUM_THREADS":"4"},
