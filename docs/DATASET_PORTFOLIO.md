@@ -39,3 +39,18 @@ Files in `artifacts/manifests/` contain source metadata, context draws and SHA25
 ## Pretraining separation
 
 No real dataset is read by `hdf5_replay.py` or `train_replay.py`. Full training uses **generic prior versus 70% maternal/30% generic mixture**, Tiny and Base, and variable rows/features; the maximum total row budget must exceed 512 to allow **512 context rows plus query rows**. Freeze real holdouts before inspecting predictive results.
+
+## Independently sourced cohort expansion — 10 November 2026
+
+Real acquisition succeeded for two additional open PhysioNet cohorts in [GitHub Actions run 42752532407](https://github.com/HELPMUMCHATBOT/nanoMaternalPFN/actions/runs/42752532407):
+
+| Cohort | Records acquired | Distinct feature profiles | Label conflicts among repeated profiles | Outcome |
+| --- | ---: | ---: | ---: | --- |
+| TPEHG, Ljubljana | 300 | 299 | 0 | Preterm birth from independently recorded delivery gestation |
+| CTU-UHB, Brno | 552 | 176 | 36 | Exploratory cord arterial pH below 7.15 |
+
+Both cohorts are independently collected from those in the original six-task set. Original acquisition yields **8 tasks over 7 distinct cohorts**, but Pima is a *non-maternal control*, VAT GDM/delivery are *two outcomes on the same cohort*, and CTU-UHB outcome is neonatal rather than maternal. These are not eight independent maternal predictive cohorts.
+
+**Methodological correction:** after examining CTU-UHB, context sampling was changed to require one distinct feature profile per context example, not merely a distinct row index. The new group-safe unique-context-v2 split artifacts must be regenerated and their digests recorded before transfer benchmarking. This can remove 512-context eligibility from UCI 863 and 256-context eligibility from CTU-UHB. The previous 8-task acquisition artifacts prove source accessibility but are superseded for final context sampling.
+
+See [the new source adapters](../src/nanomaternalpfn/data/physionet_headers.py), [AWS guide](SAGEMAKER_G5_AND_OPEN_COHORTS.md), and [split implementation](../src/nanomaternalpfn/data/freeze_splits.py).
