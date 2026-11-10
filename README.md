@@ -206,6 +206,18 @@ For interrupted runs the synthetic archive has a durable `completed` marker. To 
 
 Datasets with different endpoints are analyzed separately; the PhysioNet VAT GDM/delivery tasks share one cohort, and Pima is a *nonmaternal* transfer control. Neither counts as an independent additional maternal cohort.
 
+## Open cohort expansion and AWS GPU pretraining
+
+Two additional, independently collected public PhysioNet sources have been added as **candidate** tasks: the TPEHG term/preterm pregnancy cohort and CTU-UHB intrapartum cord-pH cohort. Source licensing, endpoint timing and exclusion of post-outcome features are described in [the A10G and cohort guide](docs/SAGEMAKER_G5_AND_OPEN_COHORTS.md). They are **not declared acquired** until the live acquisition job produces validated frozen manifests.
+
+For SageMaker `ml.g5.2xlarge` (one 24 GB A10G), the intended four sequential Tiny/Base × generic/maternal-mixture training runs comprise 2,500 optimizer steps each. **No measured A10G runtime is claimed**. Benchmark an actual forward/backward/optimizer workload before allocating the full training job:
+
+```bash
+python scripts/07_benchmark_sagemaker_a10g.py --contexts 16 128 512 --tiers tiny base --batch-size 8
+```
+
+A cautious, unverified first-run planning allocation is 6–18 hours, with up to 24 hours reserved for long contexts, I/O and retrials. See the [GPU cost and memory guidance](docs/SAGEMAKER_G5_AND_OPEN_COHORTS.md) before launching.
+
 ## References
 
 - [nanoTabPFN — educational bi-attention PFN implementation](https://github.com/automl/nanoTabPFN)
