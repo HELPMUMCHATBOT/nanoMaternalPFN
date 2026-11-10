@@ -24,7 +24,7 @@ TIERS={
 def train_replay(
     replay_path, output, *, tier="tiny", steps=2500, batch_size=8,
     lr=5e-4, seed=20261107, device="cpu", save_every=100,
-    resume=False, max_context=512, query_rows=8,
+    resume=False, max_context=512, query_rows=8, microbatch_size=None,
 ):
     """Train on a completed HDF5 replay; 'steps' is total desired steps.
 
@@ -36,6 +36,12 @@ def train_replay(
         raise ValueError("Unknown model tier")
     if steps<1 or batch_size<1 or query_rows<1:
         raise ValueError("steps, batch_size and query_rows must be positive")
+    # batch_size is the EFFECTIVE number of tables per optimizer step.
+    # Keep each CUDA forward/backward small, then accumulate gradients.
+    microbatch_size = batch_size if microbatch_size is None else int(microbatch_size)
+    if microbatch_size<1 or microbatch_size>batch_size or batch_size%microbatch_size:
+        raise ValueError("microbatch_size must be a positive divisor of batch_size")
+    accumulation_steps = batch_size // microbatch_size
     if str(device).startswith("cuda") and not torch.cuda.is_available():
         raise RuntimeError("Requested CUDA accelerator is unavailable")
     output=Path(output)
@@ -59,6 +65,10 @@ def train_replay(
                             ("max_context",max_context),("query_rows",query_rows)):
             if checkpoint[field]!=value:
                 raise ValueError(f"Cannot resume with a different {field}")
+        # Old checkpoints without this field used one full batch per update.
+        prior_microbatch = checkpoint.get("microbatch_size", checkpoint["batch_size"])
+        if prior_microbatch != microbatch_size:
+            raise ValueError("Cannot resume with a different microbatch_size")
         model.load_state_dict(checkpoint["state_dict"])
         optimizer.load_state_dict(checkpoint["optimizer"])
         start=int(checkpoint["step"])
@@ -69,27 +79,33 @@ def train_replay(
     model.train()
     with HDF5TaskReplay(replay_path) as replay:
         for step in range(start+1,steps+1):
-            x,y,n_ctx,n_classes=replay.sample_batch(
-                rng,batch_size=batch_size,
-                context_budgets=[b for b in (16,32,64,128,256,512) if b<=max_context],
-                query_rows=query_rows)
-            x=torch.from_numpy(x).to(device)
-            y=torch.from_numpy(y).to(device)
             optimizer.zero_grad(set_to_none=True)
-            logits=model(x,y[:,:n_ctx],n_classes=n_classes)
-            loss=F.cross_entropy(logits.flatten(0,1),y[:,n_ctx:].flatten())
-            if not torch.isfinite(loss):
-                raise RuntimeError(f"Non-finite loss at optimizer step {step}")
-            loss.backward()
+            step_loss = 0.0
+            for micro_step in range(accumulation_steps):
+                x,y,n_ctx,n_classes=replay.sample_batch(
+                    rng,batch_size=microbatch_size,
+                    context_budgets=[b for b in (16,32,64,128,256,512) if b<=max_context],
+                    query_rows=query_rows)
+                x=torch.from_numpy(x).to(device)
+                y=torch.from_numpy(y).to(device)
+                logits=model(x,y[:,:n_ctx],n_classes=n_classes)
+                loss=F.cross_entropy(logits.flatten(0,1),y[:,n_ctx:].flatten())
+                if not torch.isfinite(loss):
+                    raise RuntimeError(f"Non-finite loss at optimizer step {step}, microbatch {micro_step+1}")
+                (loss / accumulation_steps).backward()
+                step_loss += float(loss.detach().cpu()) / accumulation_steps
             torch.nn.utils.clip_grad_norm_(model.parameters(),1.)
             optimizer.step()
-            losses.append(float(loss.detach().cpu()))
+            losses.append(step_loss)
             if step%save_every==0 or step==steps:
                 state={
                     "state_dict":model.state_dict(),
                     "optimizer":optimizer.state_dict(),
                     "config":asdict(cfg),"tier":tier,
                     "seed":seed,"lr":lr,"batch_size":batch_size,
+                    "microbatch_size":microbatch_size,
+                    "gradient_accumulation_steps":accumulation_steps,
+                    "task_presentations":step*batch_size,
                     "max_context":max_context,"query_rows":query_rows,
                     "step":step,"losses":losses,"prior":replay.settings,
                     "replay_sha256":replay_hash,"synthetic_only":True,
@@ -105,9 +121,14 @@ def train_replay(
                 # Separate weights-only checkpoint for safe inference loading.
                 inference=output.with_name(output.stem+".inference.pt")
                 torch.save({"state_dict":model.state_dict(),"config":asdict(cfg),
-                            "step":step,"synthetic_only":True},inference)
+                            "step":step,"synthetic_only":True,
+                            "effective_batch_size":batch_size,
+                            "microbatch_size":microbatch_size},inference)
     report={
         "tier":tier,"step":max(start,steps),"parameter_count":model.parameter_count(),
+        "effective_batch_size":batch_size,"microbatch_size":microbatch_size,
+        "gradient_accumulation_steps":accumulation_steps,
+        "task_presentations":max(start,steps)*batch_size,
         "loss_last":losses[-1] if losses else None,
         "checkpoint":str(output),"inference_checkpoint":str(output.with_name(output.stem+".inference.pt")),"replay_sha256":replay_hash,
         "synthetic_only":True,"research_validated":False,
@@ -123,7 +144,9 @@ def main():
     p.add_argument("--output",default="artifacts/checkpoints/tiny_mixture.pt")
     p.add_argument("--tier",choices=TIERS,default="tiny")
     p.add_argument("--steps",type=int,default=2500)
-    p.add_argument("--batch-size",type=int,default=8)
+    p.add_argument("--batch-size",type=int,default=8,help="Effective tasks per optimizer step")
+    p.add_argument("--microbatch-size",type=int,default=None,
+                   help="Tasks per forward/backward; defaults to effective batch size")
     p.add_argument("--lr",type=float,default=5e-4)
     p.add_argument("--device",default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--seed",type=int,default=20261107)
@@ -136,7 +159,7 @@ def main():
                         batch_size=a.batch_size,lr=a.lr,seed=a.seed,
                         device=a.device,save_every=a.save_every,
                         resume=a.resume,max_context=a.max_context,
-                        query_rows=a.query_rows)
+                        query_rows=a.query_rows,microbatch_size=a.microbatch_size)
     print(json.dumps(report,indent=2))
 
 
