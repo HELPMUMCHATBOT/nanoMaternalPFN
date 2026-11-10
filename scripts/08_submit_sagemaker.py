@@ -19,19 +19,25 @@ def main():
     p.add_argument("--prefix",default="nanomaternalpfn/phase2")
     p.add_argument("--role-arn",default="arn:aws:iam::355119164071:role/SageMakerExecutionRole")
     p.add_argument("--steps",type=int,default=2500)
-    p.add_argument("--batch-size",type=int,default=8)
+    p.add_argument("--batch-size",type=int,default=32,help="Effective batch size for full training")
+    p.add_argument("--microbatch-size",type=int,default=8,help="Per-forward batch size for accumulated training")
     p.add_argument("--num-tables",type=int,default=200000)
     p.add_argument("--max-run-seconds",type=int,default=86400)
     args=p.parse_args()
     if args.batch_size<1 or args.steps<1 or args.num_tables<1:
         p.error("batch-size, steps and num-tables must be positive")
+    if args.microbatch_size<1 or args.batch_size%args.microbatch_size:
+        p.error("microbatch-size must be a positive divisor of batch-size")
     uri=f"s3://{args.bucket}/{args.prefix.strip('/')}"
     print(json.dumps({
         "mode":args.mode,"will_launch_billable_gpu":args.submit,
         "instance_type":"ml.g5.2xlarge","region":args.region,
         "role_arn":args.role_arn,"s3_prefix":uri,
         "steps_per_model":args.steps,"num_tables_per_prior":args.num_tables,
-        "batch_size":args.batch_size,
+        "effective_batch_size":args.batch_size,
+        "microbatch_size":args.microbatch_size,
+        "gradient_accumulation_steps":args.batch_size//args.microbatch_size,
+        "task_presentations_per_model":args.steps*args.batch_size,
         "checkpoint_s3_uri":uri+"/checkpoints",
         "note":"SageMaker writes final model and results to output prefix. No prior archives are uploaded automatically."
     },indent=2))
@@ -69,7 +75,8 @@ def main():
         hyperparameters={
             "mode":args.mode,
             "steps":args.steps,
-            "batch-size":args.batch_size,
+            "batch-size":args.batch_size if args.mode=="train" else args.microbatch_size,
+            "microbatch-size":args.microbatch_size,
             "num-tables":args.num_tables,
             "device":"cuda",
         },
