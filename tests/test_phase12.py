@@ -78,3 +78,30 @@ def test_unique_profile_context_sampling(tmp_path):
         for draw in draws:
             assert len(set(profile_groups(x)[draw]))==int(budget)
     assert result["split_schema"]=="group_safe_unique_context_v2"
+
+
+def test_effective_batch_accumulation_and_resume_contract(tmp_path):
+    """Four tables/update with two microbatches, including checkpoint provenance."""
+    torch.set_num_threads(1)
+    prior=tmp_path/"accumulation.h5"
+    create_replay(prior,num_tables=24,seed=61,min_rows=24,max_rows=40,
+                  min_features=5,max_features=8)
+    output=tmp_path/"accumulated.pt"
+    run=train_replay(prior,output,steps=1,batch_size=4,microbatch_size=2,
+                     max_context=16,seed=62,save_every=1)
+    assert run["effective_batch_size"]==4
+    assert run["microbatch_size"]==2
+    assert run["gradient_accumulation_steps"]==2
+    assert run["task_presentations"]==4
+    ckpt=torch.load(output,map_location="cpu",weights_only=False)
+    assert ckpt["task_presentations"]==4
+    assert ckpt["gradient_accumulation_steps"]==2
+    run2=train_replay(prior,output,steps=2,batch_size=4,microbatch_size=2,
+                      max_context=16,seed=62,save_every=1,resume=True)
+    assert run2["task_presentations"]==8
+    with pytest.raises(ValueError,match="microbatch_size"):
+        train_replay(prior,output,steps=3,batch_size=4,microbatch_size=1,
+                     max_context=16,seed=62,resume=True)
+    with pytest.raises(ValueError,match="microbatch_size"):
+        train_replay(prior,output,steps=1,batch_size=4,microbatch_size=3,
+                     max_context=16,seed=62)
