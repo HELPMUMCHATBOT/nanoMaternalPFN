@@ -7,7 +7,6 @@ outcome values are included as predictors.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from functools import lru_cache
 import re
 
 import numpy as np
@@ -52,7 +51,7 @@ def _parse_comments(text):
         if not s or s.lower().startswith(("comments:", "--", "-----")):
             continue
         # Keep all text after the *first* whitespace as a single value.
-        match=re.match(r"^([A-Za-z][A-Za-z_.]*)\\s+(.+)$",s)
+        match=re.match(r"^([A-Za-z][A-Za-z_.]*)\s+(.+)$",s)
         if match:
             result[match.group(1).strip()]=match.group(2).strip()
     return result
