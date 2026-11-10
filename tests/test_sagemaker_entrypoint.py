@@ -6,7 +6,15 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import sagemaker_train
+# The SageMaker entrypoint lives at repository root rather than in the
+# installed src-layout package. pytest's console entrypoint does not always
+# put that root on sys.path, so load the explicit source path.
+import importlib.util
+
+_ENTRYPOINT = Path(__file__).resolve().parents[1] / "sagemaker_train.py"
+_spec = importlib.util.spec_from_file_location("sagemaker_train", _ENTRYPOINT)
+sagemaker_train = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(sagemaker_train)
 
 
 def test_benchmark_propagates_src_pythonpath(tmp_path):
