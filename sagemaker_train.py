@@ -57,7 +57,9 @@ def _train(args, model_dir: Path, output_dir: Path, checkpoint_dir: Path) -> Non
     provenance = {"synthetic_only": True, "seed": args.seed,
                   "num_tables_per_prior": args.num_tables, "archives": [],
                   "config": {"steps_per_arm": args.steps,
-                             "batch_size": args.batch_size,
+                             "effective_batch_size": args.batch_size,
+                             "microbatch_size": args.microbatch_size,
+                             "gradient_accumulation_steps": args.batch_size // args.microbatch_size,
                              "context_max": args.max_context,
                              "query_rows": 8}}
     _write_json(output_dir / "job_config.json", provenance["config"])
@@ -92,7 +94,7 @@ def _train(args, model_dir: Path, output_dir: Path, checkpoint_dir: Path) -> Non
             ckpt = checkpoint_dir / f"{tier}_{prior}.pt"
             result = train_replay(
                 replay, ckpt, tier=tier, steps=args.steps,
-                batch_size=args.batch_size, seed=args.seed,
+                batch_size=args.batch_size, microbatch_size=args.microbatch_size, seed=args.seed,
                 device=args.device, max_context=args.max_context,
                 query_rows=8, save_every=max(1, args.steps // 10),
                 resume=ckpt.exists(),
@@ -113,7 +115,10 @@ def main() -> None:
     parser.add_argument("--mode", choices=("benchmark", "train"), required=True)
     parser.add_argument("--steps", type=int, default=2500)
     parser.add_argument("--num-tables", type=int, default=200000)
-    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--batch-size", type=int, default=32,
+                        help="Effective tasks per optimizer step")
+    parser.add_argument("--microbatch-size", type=int, default=8,
+                        help="Tasks per forward/backward; four accumulations at defaults")
     parser.add_argument("--max-context", type=int, default=512)
     parser.add_argument("--seed", type=int, default=20261107)
     parser.add_argument("--device", choices=("cuda", "cpu"), default="cuda")
@@ -124,6 +129,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.steps < 1 or args.num_tables < 1 or args.batch_size < 1:
         raise ValueError("steps, num-tables, batch-size must be positive")
+    if args.microbatch_size < 1 or args.batch_size % args.microbatch_size:
+        raise ValueError("microbatch-size must be a positive divisor of batch-size")
     if args.max_context < 16:
         raise ValueError("max-context must be at least 16")
     model_dir = Path(os.getenv("SM_MODEL_DIR", "artifacts/sagemaker/model"))
