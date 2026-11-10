@@ -18,8 +18,9 @@ def main():
     p.add_argument("--output-dir",default="artifacts/manifests")
     p.add_argument("--seed",type=int,default=20261107)
     p.add_argument("--require-all",action="store_true",help="Nonzero exit if any specified dataset unavailable")
+    p.add_argument("--reuse-frozen",action="store_true",help="Preserve existing SHA-verified frozen splits and retry only failed sources")
     args=p.parse_args()
-    report=acquire_and_freeze(args.names,args.output_dir,seed=args.seed)
+    report=acquire_and_freeze(args.names,args.output_dir,seed=args.seed,reuse_frozen=args.reuse_frozen)
     for name,record in report["dataset_results"].items():
         print(f"{name}: {record['status']}" +
               (f" ({record['reason']})" if record["status"]!="frozen" else
