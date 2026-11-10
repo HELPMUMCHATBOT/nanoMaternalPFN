@@ -37,7 +37,14 @@ def _benchmark(args, output_dir: Path) -> None:
         "--steps", str(args.steps),
         "--output", str(path),
     ]
-    subprocess.run(command, check=True)
+    # SageMaker's source_dir contains the package under src/, but subprocesses
+    # do not inherit this process's sys.path. Export an absolute PYTHONPATH so
+    # the benchmark script can import nanomaternalpfn from a fresh interpreter.
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(filter(None, (
+        str(ROOT / "src"), env.get("PYTHONPATH", ""),
+    )))
+    subprocess.run(command, check=True, env=env)
 
 
 def _train(args, model_dir: Path, output_dir: Path, checkpoint_dir: Path) -> None:
