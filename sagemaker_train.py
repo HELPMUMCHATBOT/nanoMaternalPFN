@@ -141,7 +141,12 @@ def main() -> None:
     if args.max_context < 16:
         raise ValueError("max-context must be at least 16")
     model_dir = Path(os.getenv("SM_MODEL_DIR", "artifacts/sagemaker/model"))
-    output_dir = Path(os.getenv("SM_OUTPUT_DIR", "artifacts/sagemaker/output"))
+    # SageMaker archives non-model artifacts only from /opt/ml/output/data.
+    # SM_OUTPUT_DIR can point to its parent /opt/ml/output in some toolkit versions.
+    if os.getenv("SM_MODEL_DIR"):
+        output_dir = Path(os.getenv("SM_OUTPUT_DATA_DIR", "/opt/ml/output/data"))
+    else:
+        output_dir = Path("artifacts/sagemaker/output")
     checkpoint_dir = Path("/opt/ml/checkpoints" if os.getenv("SM_MODEL_DIR") else "artifacts/sagemaker/checkpoints")
     output_dir.mkdir(parents=True, exist_ok=True)
     if args.mode == "benchmark":
