@@ -114,15 +114,15 @@ class HDF5TaskReplay:
         # Choose budget first. Sampling arbitrary row counts first would
         # suppress large contexts almost completely at useful batch sizes.
         eligible=[(c,b) for c,ids in self.by_class.items() for b in context_budgets
-                  if np.any(self.n_rows[ids]>b)]
+                  if np.any(self.n_rows[ids]>=b+query_rows)]
         if not eligible:
             raise ValueError("No suitable context budget in prior archive")
         n_classes,n_ctx=eligible[int(rng.integers(len(eligible)))]
         ids=self.by_class[n_classes]
-        ids=ids[self.n_rows[ids]>n_ctx]
+        ids=ids[self.n_rows[ids]>=n_ctx+query_rows]
         indices=rng.choice(ids,size=batch_size,replace=True)
         tables=[self.read(int(i)) for i in indices]
-        n_q=min(query_rows,min(len(t[1]) for t in tables)-n_ctx)
+        n_q=query_rows
         min_f=min(t[0].shape[1] for t in tables)
         low=min(feature_range[0],min_f)
         high=min(feature_range[1],min_f)
