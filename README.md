@@ -87,6 +87,17 @@ For a table containing `N_context` labeled rows, `N_query` unlabeled rows and `F
 
 See [the implementation](src/nanomaternalpfn/model.py) and [model card](docs/model_card.md). **No published clinical-performance claim follows from architecture alone.**
 
+### Completed synthetic-prior generation (10 November 2026)
+
+Both complete research-scale synthetic prior archives have now been **generated and validated**:
+
+| Prior archive | Tasks | Source | SHA-256 provenance |
+| --- | ---: | --- | --- |
+| `generic_prior_200k.h5` | 200,000 | Generic synthetic prior | [Manifest](artifacts/manifests/full_synthetic_priors_400k.json) |
+| `maternal_mixture_prior_200k.h5` | 200,000 | 140,083 maternal / 59,917 generic tasks | [Manifest](artifacts/manifests/full_synthetic_priors_400k.json) |
+
+Each archive is 3,095,890,480 bytes. HDF5 completion markers and selected table/label shapes were validated, along with replay at each 16–512 context budget. The large HDF5 bytes are **not stored in Git**; use the manifest to verify transferred archives. Full-scale GPU *training* on these tasks remains pending, and generated tasks do not establish clinical performance.
+
 ## Synthetic prior and pretraining
 
 The repository separates **generic** synthetic table tasks from **maternal-shaped** tasks and offers a mixture configuration (70% maternal by default).
