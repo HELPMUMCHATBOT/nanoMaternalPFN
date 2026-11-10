@@ -13,6 +13,7 @@ def main():
     p.add_argument("--names",nargs="+",default=[
         "uci_maternal_risk","vat_gdm","vat_delivery",
         "low_birth_weight","cardiotocography","pima_diabetes",
+        "tpehg_preterm","ctu_cord_acidemia",
     ],choices=sorted(SOURCES))
     p.add_argument("--output-dir",default="artifacts/manifests")
     p.add_argument("--seed",type=int,default=20261107)
