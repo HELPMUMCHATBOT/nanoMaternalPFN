@@ -102,10 +102,14 @@ def train_replay(
                 tmp=output.with_name(output.name+".tmp")
                 torch.save(state,tmp)
                 tmp.replace(output)
+                # Separate weights-only checkpoint for safe inference loading.
+                inference=output.with_name(output.stem+".inference.pt")
+                torch.save({"state_dict":model.state_dict(),"config":asdict(cfg),
+                            "step":step,"synthetic_only":True},inference)
     report={
         "tier":tier,"step":max(start,steps),"parameter_count":model.parameter_count(),
         "loss_last":losses[-1] if losses else None,
-        "checkpoint":str(output),"replay_sha256":replay_hash,
+        "checkpoint":str(output),"inference_checkpoint":str(output.with_name(output.stem+".inference.pt")),"replay_sha256":replay_hash,
         "synthetic_only":True,"research_validated":False,
         "device":str(device),
     }
