@@ -1,0 +1,4 @@
+# Installed automatically by the SageMaker PyTorch training toolkit before entrypoint.
+# PyTorch and CUDA are supplied by the SageMaker PyTorch GPU container.
+numpy>=1.26,<2
+h5py>=3.9,<4
