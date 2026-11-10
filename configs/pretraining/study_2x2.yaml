@@ -1,0 +1,24 @@
+# Experiment plan, not a completed run.
+seed: 20261107
+priors:
+  generic: 1.0
+  mixture:
+    maternal_probability: 0.70
+    generic_probability: 0.30
+model_tiers: [tiny, base]
+num_synthetic_tasks_per_prior: 200000
+min_total_rows: 32
+max_total_rows: 576 # 512 context + at least 1 query
+min_features: 5
+max_features: 16
+context_budgets: [16, 32, 64, 128, 256, 512]
+query_rows: 8
+training:
+  steps: 2500
+  batch_size: 8
+  lr: 0.0005
+  optimizer: AdamW
+  save_every: 100
+evidence:
+  fully_trained: false
+  clinical_validated: false
