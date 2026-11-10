@@ -172,21 +172,67 @@ def get_open_task(name, local_file=None):
     }
     return encoded, labels.codes.astype(np.int64), meta
 
-def acquire_and_freeze(names, out_dir="artifacts/manifests", seed=20261107):
-    """Attempt real dataset acquisition, record any failed source separately."""
+def _verified_frozen_split(out_dir, name, entry):
+    """A previous 'frozen' label alone is insufficient: verify the actual bytes."""
+    try:
+        manifest_path = out_dir / f"{name}.json"
+        manifest = json.loads(manifest_path.read_text())
+        npz_path = manifest_path.with_suffix(".npz")
+        digest = sha256(npz_path.read_bytes()).hexdigest()
+        return (
+            entry.get("status") == "frozen"
+            and manifest.get("sha256") == digest
+            and entry.get("split_sha256") == digest
+        )
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def acquire_and_freeze(
+    names, out_dir="artifacts/manifests", seed=20261107, reuse_frozen=False
+):
+    """Acquire/audit open data, optionally preserving SHA-verified frozen splits.
+
+    With reuse_frozen=True, only failed/missing entries are retried, while the
+    existing portfolio report is merged with the new results. The frozen NPZ,
+    its manifest and its source provenance are never overwritten when valid.
+    """
     from .freeze_splits import freeze
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    report={"seed":seed,"dataset_results":{},"cohort_nonindependence":["vat_gdm","vat_delivery"]}
+    report_path = out_dir / "open_portfolio_report.json"
+    report = {"seed": seed, "dataset_results": {},
+              "cohort_nonindependence": ["vat_gdm", "vat_delivery"]}
+    if reuse_frozen and report_path.exists():
+        previous = json.loads(report_path.read_text())
+        if previous.get("seed") != seed:
+            raise ValueError("Cannot reuse frozen splits with a different seed")
+        report["dataset_results"] = dict(previous.get("dataset_results", {}))
+        report["cohort_nonindependence"] = previous.get(
+            "cohort_nonindependence", report["cohort_nonindependence"]
+        )
     for name in names:
+        previous_entry = report["dataset_results"].get(name, {})
+        if reuse_frozen and _verified_frozen_split(out_dir, name, previous_entry):
+            continue
         try:
-            x,y,meta=get_open_task(name)
-            manifest=freeze(x,y,out_dir / f"{name}.json",seed=seed)
+            x, y, meta = get_open_task(name)
+            manifest = freeze(x, y, out_dir / f"{name}.json", seed=seed)
             report["dataset_results"][name] = {
-                "status":"frozen","source":meta,"split_sha256":manifest["sha256"],"audit":manifest["audit"],
-                "eligible_context_budgets":sorted(int(s) for s in manifest["context_draws"]),
+                "status": "frozen", "source": meta,
+                "split_sha256": manifest["sha256"], "audit": manifest["audit"],
+                "eligible_context_budgets": sorted(
+                    int(s) for s in manifest["context_draws"]
+                ),
             }
         except Exception as exc:
-            report["dataset_results"][name]={"status":"unavailable","reason":str(exc)}
-    (out_dir / "open_portfolio_report.json").write_text(json.dumps(report,indent=2))
+            report["dataset_results"][name] = {
+                "status": "unavailable", "reason": str(exc)
+            }
+        # Atomic report writes protect completed statuses from interruptions.
+        temp_report = report_path.with_name(report_path.name + ".tmp")
+        temp_report.write_text(json.dumps(report, indent=2))
+        temp_report.replace(report_path)
+    if not report_path.exists():
+        report_path.write_text(json.dumps(report, indent=2))
     return report
