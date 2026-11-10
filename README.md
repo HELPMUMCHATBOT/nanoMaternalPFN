@@ -180,6 +180,32 @@ assets/                           Original supplied PNG figures
 
 Do not report unexecuted experiments as research results. Pretraining on synthetic tasks must remain entirely separate from source-verified real-world holdouts.
 
+
+## Priority 1 and 2: data acquisition and research pretraining
+
+The paper's original "Open-7" portfolio is a proposed task list, **not** seven verified independent maternal cohorts. The initial source audit is available in [Dataset Portfolio](docs/DATASET_PORTFOLIO.md). Use publicly obtainable sources only; the [acquisition script](scripts/01_acquire_open_sources.py) writes explicit per-source successes/failures and frozen SHA256 manifests, never synthetic patient substitutes.
+
+```bash
+python -m pip install -e ".[data,test]"
+python scripts/01_acquire_open_sources.py
+cat artifacts/manifests/open_portfolio_report.json
+```
+
+**Pretraining runs entirely on synthetic tasks** and is independent of real-dataset downloads. The research configuration is [study_2x2.yaml](configs/pretraining/study_2x2.yaml). It specifies 200,000 generated tasks *per prior*, generic and 70/30 maternal/generic, and Tiny/Base model tiers.
+
+```bash
+# Quick correctness check; four miniature smoke checkpoints, NOT a trained research study
+python scripts/06_pretrain_study.py --smoke --device cpu
+
+# Full 2x2 study: use a GPU-equipped machine with sufficient disk capacity
+python scripts/06_pretrain_study.py --num-tables 200000 --steps 2500 \
+  --batch-size 8 --device cuda
+```
+
+For interrupted runs the synthetic archive has a durable `completed` marker. To resume a particular checkpoint, use the [replay trainer](src/nanomaternalpfn/train_replay.py) `--resume` with the same prior archive, model, and optimizer settings. **Research claims require the full requested run to complete**; CI or smoke-test success does not establish clinical performance. The HDF5 generator and replay trainer support mixed 2/3-class synthetic tasks, 16–512 context budgets and variable feature counts.
+
+Datasets with different endpoints are analyzed separately; the PhysioNet VAT GDM/delivery tasks share one cohort, and Pima is a *nonmaternal* transfer control. Neither counts as an independent additional maternal cohort.
+
 ## References
 
 - [nanoTabPFN — educational bi-attention PFN implementation](https://github.com/automl/nanoTabPFN)
