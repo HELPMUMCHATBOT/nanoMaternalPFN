@@ -1,0 +1,35 @@
+name: Public dataset schema and split audit
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'src/nanomaternalpfn/data/**'
+      - 'scripts/01_acquire_open_sources.py'
+      - '.github/workflows/data_sources.yml'
+      - 'pyproject.toml'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install clinical-data adapters
+        run: python -m pip install -e ".[data,test]"
+      - name: Fetch public uncredentialed cohorts and freeze audited splits
+        run: python scripts/01_acquire_open_sources.py
+      - name: Upload source status and manifests only (no patient records)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: open-sources-audit
+          path: |
+            artifacts/manifests/*.json
+          if-no-files-found: warn
