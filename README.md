@@ -2,7 +2,7 @@
 
 Research-only implementation of a missingness-aware, alternating feature/patient-attention prior-data fitted network for low-data tabular maternal-health tasks. **Not validated for diagnosis, triage, treatment or deployment to patients.** No pretrained model efficacy or mobile memory/latency result is claimed.
 
-![Proposed model architecture](assets/architecture.png)
+![Proposed model architecture](assets/architecture.svg)
 
 ## Scope
 
