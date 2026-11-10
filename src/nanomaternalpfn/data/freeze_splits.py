@@ -21,17 +21,27 @@ def freeze(x, y, output, seed=20261107, test_fraction=.3, budgets=(16,32,64,128,
     data_path=output.with_suffix('.npz')
     np.savez_compressed(data_path, X=x.astype(np.float32),y=y,train_idx=train_idx,test_idx=test_idx)
     context_draws = {}
+    # Each draw has distinct clinical feature profiles, not merely distinct
+    # row indices. Contradictory outcomes remain within the same split.
+    train_groups=groups[train_idx]
+    unique_group_ids=np.unique(train_groups)
+    group_to_records={int(g):train_idx[train_groups==g] for g in unique_group_ids}
     for b in budgets:
-        if b > len(train_idx):
+        if b > len(unique_group_ids):
             continue
         draws=[]
         for i in range(n_seeds):
             rng=np.random.default_rng(seed + b*1009 + i)
-            draws.append(rng.choice(train_idx, size=b, replace=False).tolist())
+            selected=rng.choice(unique_group_ids,size=b,replace=False)
+            draw=[int(rng.choice(group_to_records[int(g)])) for g in selected]
+            assert np.unique(groups[draw]).size == b
+            draws.append(draw)
         context_draws[str(b)] = draws
     manifest={'source':'real_external_dataset_requires_provenance','seed':seed,
               'npz':data_path.name,'sha256':hashlib.sha256(data_path.read_bytes()).hexdigest(),
               'audit':audit_profiles(x,y),'n_train':len(train_idx),'n_test':len(test_idx),
+              'n_unique_context_profiles':int(len(unique_group_ids)),
+              'split_schema':'group_safe_unique_context_v2',
               'context_draws':context_draws,'test_idx':test_idx.tolist()}
     output.write_text(json.dumps(manifest,indent=2))
     return manifest
