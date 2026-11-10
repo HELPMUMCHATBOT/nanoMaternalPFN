@@ -1,0 +1,8 @@
+prior: mixture
+maternal_probability: 0.7
+seed: 20261107
+n_tables: 200000
+n_rows: 256
+n_features: 10
+n_classes: 3
+# Declared study configuration only; not a completed 200k run.

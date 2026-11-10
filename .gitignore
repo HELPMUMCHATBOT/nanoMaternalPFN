@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+*.egg-info/
+artifacts/checkpoints/*
+artifacts/priors_h5/*
+artifacts/results/*
+artifacts/data_processed/*
+data/raw/
+!artifacts/checkpoints/.gitkeep
+!artifacts/priors_h5/.gitkeep

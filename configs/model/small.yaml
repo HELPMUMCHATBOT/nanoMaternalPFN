@@ -1,0 +1,6 @@
+name: small
+n_layers: 4
+d_model: 128
+n_heads: 4
+mlp_hidden: 256
+max_classes: 3

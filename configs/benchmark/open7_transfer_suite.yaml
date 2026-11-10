@@ -1,0 +1,5 @@
+context_budgets: [16, 32, 64, 128, 256, 512]
+n_seeds: 20
+seed: 20261107
+strict_provenance: true
+# Only available, verified datasets may be included in official results.
