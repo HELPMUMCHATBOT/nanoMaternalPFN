@@ -63,3 +63,18 @@ def test_missing_real_dataset_not_fabricated():
     from nanomaternalpfn.data.open_sources import get_open_task
     with pytest.raises(KeyError,match="Unavailable/unverified"):
         get_open_task("fake_maternal_cohort")
+
+
+def test_unique_profile_context_sampling(tmp_path):
+    from nanomaternalpfn.data.freeze_splits import freeze
+    from nanomaternalpfn.data.deduplicate import profile_groups
+    import numpy as np
+    x=np.arange(300,dtype=float).reshape(75,4)
+    x=np.concatenate([x,x[:25],x[:25]],axis=0)
+    y=np.arange(len(x))%2
+    result=freeze(x,y,tmp_path/"unique.json",budgets=(16,32,64,128),n_seeds=2)
+    assert "128" not in result["context_draws"]
+    for budget,draws in result["context_draws"].items():
+        for draw in draws:
+            assert len(set(profile_groups(x)[draw]))==int(budget)
+    assert result["split_schema"]=="group_safe_unique_context_v2"
