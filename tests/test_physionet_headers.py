@@ -26,7 +26,7 @@ def test_tpehg_parses_open_header_and_protects_outcome():
     a=_parse_comments(raw)
     assert a["Gestation"]=="35" and a["Rectime"]=="31.3"
     pairs=[("tpehg1007.hea",a),
-           ("tpehg1008.hea",{**a,"RecID":"1008","Gestation":"39","Age":"35"})]
+           ("tpehg1008.hea",{**a,"RecID":"1008","Gestation":"39","Age":"35", "Parity":"2", "Weight":"68", "Abortions":"1", "Rectime":"23.1", "Hypertension":"yes", "Smoker":"yes"})]
     x,y=_tpehg_dataframe(pairs)
     assert list(y)==[1,0]
     assert not {"Gestation","Group","Premature","preterm"}.intersection(x.columns)
@@ -55,7 +55,7 @@ def test_ctu_header_uses_maternal_metadata_not_delivery_outcomes():
 """
     a=_parse_comments(raw)
     assert a["pH"]=="7.14"
-    pairs=[("1001.hea",a)]*11+[("1002.hea",{**a,"pH":"7.20","Age":"25","Parity":"1"})]*12
+    pairs=[("1001.hea",a)]*11+[("1002.hea",{**a,"pH":"7.20","Age":"25","Parity":"1","Gravidity":"3","Diabetes":"0","Hypertension":"1","Preeclampsia":"1"})]*12
     x,y=_ctu_dataframe(pairs)
     assert len(y)==23 and y.sum()==11
     assert list(x.columns)==["Age","Gravidity","Parity","Diabetes","Hypertension","Preeclampsia"]
