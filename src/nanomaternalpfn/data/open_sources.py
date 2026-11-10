@@ -6,7 +6,6 @@ after retrieval, schema validation and a recorded content checksum.
 """
 from dataclasses import dataclass, asdict
 from hashlib import sha256
-from io import BytesIO
 import json
 from pathlib import Path
 
@@ -40,6 +39,12 @@ SOURCES = {
     "low_birth_weight": Source("low_birth_weight","mass_birthwt_1986","obstetric_outcome","low_birthweight",
         "https://vincentarelbundock.github.io/Rdatasets/doc/MASS/birthwt.html","verify redistribution terms",(185,193),
         "189-record hospital-derived MASS example. Exclude birth weight in grams: it defines the label."),
+    "tpehg_preterm": Source("tpehg_preterm","tpehgdb_1_0_1","maternal_outcome","preterm_birth",
+        "https://physionet.org/content/tpehgdb/1.0.1/","PhysioNet ODC-By 1.0; verify source terms",(290,310),
+        "Independent 300-pregnancy EHG cohort; use only recording-time maternal metadata, not delivery gestation."),
+    "ctu_cord_acidemia": Source("ctu_cord_acidemia","ctu_uhb_1_0_0","neonatal_outcome","umbilical_cord_ph",
+        "https://physionet.org/content/ctu-uhb-ctgdb/1.0.0/","PhysioNet open access, noncommercial citation conditions",(480,560),
+        "Independent 552-delivery CTG cohort; exploratory pH<7.15 outcome and pre-outcome maternal-only variables."),
     "pima_diabetes": Source("pima_diabetes","openml_37","nonmaternal_control","diabetes",
         "https://www.openml.org/d/37","verify OpenML source terms",(760,780),
         "Not a gestational diabetes study: female diabetes negative-control/transfer task."),
@@ -140,6 +145,9 @@ def get_open_task(name, local_file=None):
         x,y = _birthwt(local_file)
     elif name == "pima_diabetes":
         x,y = _pima()
+    elif name in ("tpehg_preterm","ctu_cord_acidemia"):
+        from .physionet_headers import load_tpehg_preterm,load_ctu_uhb_acidemia
+        x,y = load_tpehg_preterm() if name=="tpehg_preterm" else load_ctu_uhb_acidemia()
     if not (src.expected_n[0] <= len(x) <= src.expected_n[1]):
         raise ValueError(f"{name}: unexpected row count {len(x)}")
     if y.isna().any():
