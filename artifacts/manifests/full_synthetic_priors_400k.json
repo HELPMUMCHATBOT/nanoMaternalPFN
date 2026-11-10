@@ -1,0 +1,60 @@
+{
+  "generated_utc": "2026-11-10",
+  "status": "complete",
+  "source": "synthetic-only",
+  "total_tasks": 400000,
+  "seed": 20261107,
+  "code_sources": {
+    "prior_generator": "src/nanomaternalpfn/priors/hdf5_replay.py",
+    "task_distribution": "src/nanomaternalpfn/priors/maternal_scm.py"
+  },
+  "settings": {
+    "min_rows": 32,
+    "max_rows": 576,
+    "min_features": 5,
+    "max_features": 16,
+    "n_classes": [
+      2,
+      3
+    ],
+    "maternal_probability_for_mixture": 0.7
+  },
+  "files": [
+    {
+      "filename": "generic_prior_200k.h5",
+      "prior": "generic",
+      "tasks": 200000,
+      "n_binary": 99826,
+      "n_three_class": 100174,
+      "n_maternal": 0,
+      "n_generic": 200000,
+      "bytes": 3095890480,
+      "sha256": "076479ee83d3e949a30979d5c1c37f69d76eeaf10dd0294500b8d5fe7385968f"
+    },
+    {
+      "filename": "maternal_mixture_prior_200k.h5",
+      "prior": "mixture",
+      "tasks": 200000,
+      "n_binary": 99826,
+      "n_three_class": 100174,
+      "n_maternal": 140083,
+      "n_generic": 59917,
+      "bytes": 3095890480,
+      "sha256": "0a802524c1c7bcf6e87dd2c0b4742a247d9345d78db0efd408784db3e2e76a42"
+    }
+  ],
+  "validation": {
+    "hdf5_completed_attribute": 200000,
+    "sampled_arrays_and_labels_checked": true,
+    "replay_context_budgets_tested": [
+      16,
+      32,
+      64,
+      128,
+      256,
+      512
+    ],
+    "original_hdf5_files_not_in_git": true
+  },
+  "clinical_scope": "Synthetic training tasks; not observed patient data, clinical validation, or trained weights."
+}
