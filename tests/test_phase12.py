@@ -105,3 +105,36 @@ def test_effective_batch_accumulation_and_resume_contract(tmp_path):
     with pytest.raises(ValueError,match="microbatch_size"):
         train_replay(prior,output,steps=1,batch_size=4,microbatch_size=3,
                      max_context=16,seed=62)
+
+
+def test_heldout_validation_history_best_checkpoint_and_resume(tmp_path):
+    """Synthetic holdout is separate; validation runs every two optimizer steps."""
+    torch.set_num_threads(1)
+    train=tmp_path/"train.h5"
+    heldout=tmp_path/"heldout.h5"
+    create_replay(train,num_tables=24,seed=141,min_rows=24,max_rows=40,
+                  min_features=5,max_features=8)
+    create_replay(heldout,num_tables=24,seed=142,min_rows=24,max_rows=40,
+                  min_features=5,max_features=8)
+    ckpt=tmp_path/"model.pt"
+    result=train_replay(train,ckpt,steps=2,batch_size=4,microbatch_size=2,
+                        max_context=16,seed=143,save_every=2,
+                        validation_path=heldout,validate_every=2,
+                        validation_batches_per_context=1,validation_batch_size=2)
+    assert result["task_presentations"]==8
+    assert len(result["validation_history"])==1
+    assert result["validation_history"][0]["step"]==2
+    assert result["best_validation_step"]==2
+    assert np.isfinite(result["best_validation_loss"])
+    assert ckpt.with_name("model.best.inference.pt").exists()
+    assert ckpt.with_name("model.step00002.inference.pt").exists()
+    result2=train_replay(train,ckpt,steps=4,batch_size=4,microbatch_size=2,
+                         max_context=16,seed=143,save_every=2,
+                         validation_path=heldout,validate_every=2,
+                         validation_batches_per_context=1,validation_batch_size=2,
+                         resume=True)
+    assert [m["step"] for m in result2["validation_history"]]==[2,4]
+    assert len(result2["validation_history"])==2
+    with pytest.raises(ValueError,match="validation archive"):
+        train_replay(train,ckpt,steps=5,batch_size=4,microbatch_size=2,
+                     max_context=16,seed=143,resume=True)
