@@ -44,3 +44,47 @@ excluded I/O and synthetic archive generation. Gradient-accumulated batch 32,
 held-out evaluation costs, checkpoint synchronization and the full 5,000-step
 study have not yet been benchmarked end-to-end. SageMaker may terminate the job
 at its configured maximum runtime; partial arms then require a resumed job.
+
+## 10 November 2026: independent downstream evaluation protocol
+
+**Status:** Synthetic-pretraining SageMaker job `nanomaternalpfn-train-20261110-120840`
+completed; all four best inference weights loaded successfully on macOS.
+Eight source-verified tasks have been fetched and frozen with SHA-256 checksums.
+VAT gestational diabetes and delivery are two endpoints from one cohort;
+Pima is a nonmaternal control; UCI maternal risk is a rule-derived proxy.
+These tasks must never be counted as eight independent clinical cohorts.
+
+**Run the CPU pilot first:**
+```bash
+python scripts/09_run_downstream_study.py
+```
+
+**Run all eligible context sizes and all 20 frozen context draws:**
+```bash
+python scripts/09_run_downstream_study.py --full \
+  --output-dir artifacts/results/downstream_full
+```
+
+The script validates the presence of every frozen manifest and all four
+best pretrained weights before beginning, verifies the frozen NPZ hash in
+each evaluation call, evaluates logistic regression and random forest once,
+and evaluates Tiny/Base × generic/mixture on exactly matching frozen
+context and test indices. PFN weights are frozen; no real-data fine-tuning
+is performed. Query chunks bound CPU memory without including query labels.
+All model choices, contexts, data splits, and checkpoint selection were made
+before this downstream test. No tuning on held-out test metrics is allowed.
+
+Metrics written per eligible dataset, model, context and seed: accuracy,
+one-vs-rest AUROC when defined, multiclass Brier and 15-bin ECE.
+`summary.csv` reports the descriptive mean and across-context-draw standard
+deviation. Repeated draws share the same held-out test records, so this
+standard deviation is **not** an independent uncertainty interval.
+Class-deficient context draws are skipped with explicit records.
+The pilot evaluates only a single 16-row context draw per arm and must
+never be reported as the final study.
+
+Keep pilot and full output directories separate. A process interruption may
+leave partially completed per-arm CSVs; rerunning overwrites that arm's CSV
+rather than resuming from the partial file. The protocol needs further
+statistical confidence intervals, error analysis, clinical-source review,
+and separate subgroup reporting before any strong clinical conclusion.
