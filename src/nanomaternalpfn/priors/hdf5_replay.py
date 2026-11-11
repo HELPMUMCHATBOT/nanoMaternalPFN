@@ -29,7 +29,7 @@ def file_sha256(path):
 def create_replay(
     path, *, num_tables=200000, seed=20261107, prior="mixture",
     min_rows=32, max_rows=576, min_features=5, max_features=16,
-    maternal_probability=.7, flush_every=250, limit=None,
+    maternal_probability=.7, flush_every=250, limit=None, variant='v1',
 ):
     if not num_tables>0 or not 8<=min_rows<=max_rows or not 2<=min_features<=max_features<=32:
         raise ValueError("Invalid synthetic task dimensions")
@@ -37,6 +37,8 @@ def create_replay(
         raise ValueError("maternal_probability must be between zero and one")
     if prior not in ("maternal","generic","mixture"):
         raise ValueError("Invalid prior")
+    if variant not in ('v1','v2'):
+        raise ValueError('Invalid synthetic prior variant')
     path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)
     settings={
         "num_tables":int(num_tables),"seed":int(seed),"prior":prior,
@@ -45,6 +47,10 @@ def create_replay(
         "maternal_probability":float(maternal_probability),
         "source":"synthetic","schema_version":2,
     }
+    if variant == 'v2':
+        settings.update({'schema_version':3,'variant':'v2',
+                         'class_permutation_augmented':True,
+                         'sign_flip_task_probability':0.5})
     new=not path.exists()
     with h5py.File(path,"a") as f:
         if new:
@@ -55,6 +61,8 @@ def create_replay(
             for k in ("n_rows","n_features","n_classes"):
                 f.create_dataset(k,(num_tables,),dtype="i4")
             f.create_dataset("is_maternal",(num_tables,),dtype="i1")
+            if variant == 'v2':
+                f.create_dataset('sign_flip_task_selected',(num_tables,),dtype='i1')
         elif json.loads(f.attrs["settings"])!=settings:
             raise ValueError("Existing replay settings do not match; refusing unsafe resume")
         first=int(f.attrs["completed"])
@@ -65,13 +73,17 @@ def create_replay(
             features=int(rng.integers(min_features,max_features+1))
             classes=int(rng.choice([2,3]))
             x,y,meta=sample_task(rows,features,classes,prior,rng=rng,
-                                  maternal_probability=maternal_probability)
+                                  maternal_probability=maternal_probability,
+                                  augment_class_permutation=(variant=='v2'),
+                                  augment_feature_sign_flip=(variant=='v2'))
             f["X"][i]=x.ravel()
             f["y"][i]=y.ravel()
             f["n_rows"][i]=rows
             f["n_features"][i]=features
             f["n_classes"][i]=classes
             f["is_maternal"][i]=int(meta["family"]!="generic")
+            if variant == 'v2':
+                f['sign_flip_task_selected'][i]=int(meta['sign_flip_task_selected'])
             if (i+1)%flush_every==0:
                 f.attrs["completed"]=i+1
                 f.flush()
@@ -153,6 +165,7 @@ def main():
     p.add_argument("--num-tables",type=int,default=200000)
     p.add_argument("--seed",type=int,default=20261107)
     p.add_argument("--prior",choices=["maternal","generic","mixture"],default="mixture")
+    p.add_argument('--variant',choices=('v1','v2'),default='v1')
     p.add_argument("--min-rows",type=int,default=32)
     p.add_argument("--max-rows",type=int,default=576)
     p.add_argument("--min-features",type=int,default=5)
@@ -163,7 +176,7 @@ def main():
     print(json.dumps(create_replay(a.path,num_tables=a.num_tables,seed=a.seed,
           prior=a.prior,min_rows=a.min_rows,max_rows=a.max_rows,
           min_features=a.min_features,max_features=a.max_features,
-          limit=a.limit),indent=2))
+          limit=a.limit,variant=a.variant),indent=2))
 
 
 if __name__=="__main__":

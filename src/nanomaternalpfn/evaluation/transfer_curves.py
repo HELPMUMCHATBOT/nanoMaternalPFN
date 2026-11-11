@@ -21,7 +21,7 @@ FIELDS = ("method", "context", "seed", "accuracy", "brier", "ece15", "auroc")
 def evaluate(
     manifest_path, checkpoint=None, methods=("logistic", "random_forest"),
     output="artifacts/results/transfer.csv", query_batch_size=16,
-    max_draws=None, contexts=None,
+    max_draws=None, contexts=None, pfn_kwargs=None,
 ):
     """Evaluate all applicable frozen contexts against one fixed test pool.
 
@@ -56,7 +56,8 @@ def evaluate(
             if method == "pfn" and not checkpoint:
                 raise ValueError("pretrained checkpoint required for PFN comparison")
             pfn = (NanoMaternalPFNClassifier(
-                checkpoint, query_batch_size=query_batch_size
+                checkpoint, query_batch_size=query_batch_size,
+                **(pfn_kwargs or {})
             ) if method == "pfn" else None)
             for budget, all_draws in sorted(
                 manifest["context_draws"].items(), key=lambda kv: int(kv[0])

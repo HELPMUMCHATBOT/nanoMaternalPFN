@@ -4,7 +4,8 @@ from __future__ import annotations
 import argparse
 import json
 import random
-from dataclasses import asdict
+import math
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import numpy as np
@@ -24,10 +25,11 @@ TIERS={
 
 def train_replay(
     replay_path, output, *, tier="tiny", steps=2500, batch_size=8,
-    lr=5e-4, seed=20261107, device="cpu", save_every=100,
+    lr=None, seed=20261107, device="cpu", save_every=100,
     resume=False, max_context=512, query_rows=8, microbatch_size=None,
     validation_path=None, validate_every=250, validation_batches_per_context=2,
     validation_batch_size=8, validation_seed=20271008,
+    variant='v1', warmup_steps=250,
 ):
     """Train on a completed HDF5 replay; 'steps' is total desired steps.
 
@@ -37,6 +39,15 @@ def train_replay(
     torch.set_num_threads(min(4,torch.get_num_threads()))
     if tier not in TIERS:
         raise ValueError("Unknown model tier")
+    if variant not in ('v1', 'v2'):
+        raise ValueError("Unknown model variant")
+    if warmup_steps < 0:
+        raise ValueError("warmup_steps cannot be negative")
+    peak_lr = float(lr) if lr is not None else (
+        (2e-4 if tier == 'base' else 5e-4) if variant == 'v2' else 5e-4
+    )
+    if peak_lr <= 0:
+        raise ValueError("learning rate must be positive")
     if steps<1 or batch_size<1 or query_rows<1:
         raise ValueError("steps, batch_size and query_rows must be positive")
     # batch_size is the EFFECTIVE number of tables per optimizer step.
@@ -56,9 +67,9 @@ def train_replay(
     torch.manual_seed(seed)
     rng=np.random.default_rng(seed)
     random.seed(seed)
-    cfg=TIERS[tier]
+    cfg=replace(TIERS[tier],architecture=('pre_ln_v2' if variant=='v2' else 'post_ln_v1'))
     model=NanoMaternalPFN(cfg).to(device)
-    optimizer=torch.optim.AdamW(model.parameters(),lr=lr)
+    optimizer=torch.optim.AdamW(model.parameters(),lr=peak_lr)
     start=0
     losses=[]
     validation_history=[]
@@ -69,9 +80,13 @@ def train_replay(
         if not output.exists():
             raise FileNotFoundError(output)
         checkpoint=torch.load(output,map_location="cpu",weights_only=False)
-        if checkpoint["replay_sha256"]!=replay_hash or checkpoint["config"]!=asdict(cfg):
+        if checkpoint.get("variant", "v1") != variant:
+            raise ValueError("Cannot resume on a different model variant")
+        old_config=dict(checkpoint["config"])
+        old_config.setdefault("architecture","post_ln_v1")
+        if checkpoint["replay_sha256"]!=replay_hash or old_config!=asdict(cfg):
             raise ValueError("Cannot resume on different prior archive/model architecture")
-        for field,value in (("seed",seed),("batch_size",batch_size),("lr",lr),
+        for field,value in (("seed",seed),("batch_size",batch_size),("lr",peak_lr),
                             ("max_context",max_context),("query_rows",query_rows)):
             if checkpoint[field]!=value:
                 raise ValueError(f"Cannot resume with a different {field}")
@@ -79,6 +94,11 @@ def train_replay(
         prior_microbatch = checkpoint.get("microbatch_size", checkpoint["batch_size"])
         if prior_microbatch != microbatch_size:
             raise ValueError("Cannot resume with a different microbatch_size")
+        if checkpoint.get("variant", "v1") != variant:
+            raise ValueError("Cannot resume on a different variant")
+        if variant == 'v2' and (checkpoint.get('warmup_steps') != warmup_steps or
+                                checkpoint.get('schedule_total_steps') != steps):
+            raise ValueError("Cannot resume on a different cosine schedule")
         if checkpoint.get("validation_sha256") != validation_hash:
             raise ValueError("Cannot resume with a different synthetic validation archive")
         if validation_hash is not None:
@@ -104,7 +124,21 @@ def train_replay(
     from contextlib import nullcontext
     validation_cm = HDF5TaskReplay(validation_path) if validation_path is not None else nullcontext(None)
     with validation_cm as validation_replay, HDF5TaskReplay(replay_path) as replay:
+        if replay.settings.get('variant', 'v1') != variant:
+            raise ValueError("Training prior archive variant mismatch")
+        if validation_replay is not None and validation_replay.settings.get('variant','v1') != variant:
+            raise ValueError("Synthetic validation archive variant mismatch")
         for step in range(start+1,steps+1):
+            if variant == 'v2' and tier == 'base':
+                if warmup_steps and step <= warmup_steps:
+                    factor = step / warmup_steps
+                else:
+                    progress = max(0., min(1., (step - warmup_steps) /
+                                           max(1, steps - warmup_steps)))
+                    factor = .05 + .95 * .5 * (1 + math.cos(math.pi * progress))
+                for group in optimizer.param_groups:
+                    group['lr'] = peak_lr * factor
+
             optimizer.zero_grad(set_to_none=True)
             step_loss = 0.0
             for micro_step in range(accumulation_steps):
@@ -155,7 +189,10 @@ def train_replay(
                     "state_dict":model.state_dict(),
                     "optimizer":optimizer.state_dict(),
                     "config":asdict(cfg),"tier":tier,
-                    "seed":seed,"lr":lr,"batch_size":batch_size,
+                    "seed":seed,"lr":peak_lr,"batch_size":batch_size,
+                    "variant":variant,
+                    "warmup_steps":warmup_steps if variant=='v2' else 0,
+                    "schedule_total_steps":steps if variant=='v2' else None,
                     "microbatch_size":microbatch_size,
                     "gradient_accumulation_steps":accumulation_steps,
                     "task_presentations":step*batch_size,
@@ -191,7 +228,9 @@ def train_replay(
                                 "step":step,"synthetic_only":True,
                                 "effective_batch_size":batch_size},snapshot)
     report={
-        "tier":tier,"step":max(start,steps),"parameter_count":model.parameter_count(),
+        "tier":tier,"variant":variant,
+        "peak_learning_rate":peak_lr,"warmup_steps":warmup_steps if variant=='v2' else 0,
+        "step":max(start,steps),"parameter_count":model.parameter_count(),
         "effective_batch_size":batch_size,"microbatch_size":microbatch_size,
         "gradient_accumulation_steps":accumulation_steps,
         "task_presentations":max(start,steps)*batch_size,
@@ -218,7 +257,9 @@ def main():
     p.add_argument("--batch-size",type=int,default=8,help="Effective tasks per optimizer step")
     p.add_argument("--microbatch-size",type=int,default=None,
                    help="Tasks per forward/backward; defaults to effective batch size")
-    p.add_argument("--lr",type=float,default=5e-4)
+    p.add_argument("--lr",type=float,default=None)
+    p.add_argument("--variant",choices=("v1","v2"),default="v1")
+    p.add_argument("--warmup-steps",type=int,default=250)
     p.add_argument("--device",default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--seed",type=int,default=20261107)
     p.add_argument("--save-every",type=int,default=100)
@@ -234,6 +275,7 @@ def main():
                         device=a.device,save_every=a.save_every,
                         resume=a.resume,max_context=a.max_context,
                         query_rows=a.query_rows,microbatch_size=a.microbatch_size,
+                        variant=a.variant,warmup_steps=a.warmup_steps,
                         validation_path=a.validation_replay,
                         validate_every=a.validate_every,
                         validation_batches_per_context=a.validation_batches_per_context)

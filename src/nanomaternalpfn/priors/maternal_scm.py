@@ -3,7 +3,7 @@ import numpy as np
 
 FAMILIES = ('hypertension', 'metabolic', 'history', 'messy')
 
-def sample_task(n_rows=128, n_features=10, n_classes=3, prior='mixture', seed=None, rng=None, maternal_probability=0.7):
+def sample_task(n_rows=128, n_features=10, n_classes=3, prior='mixture', seed=None, rng=None, maternal_probability=0.7, augment_class_permutation=False, augment_feature_sign_flip=False):
     if n_rows < 8 or not 2 <= n_features <= 32 or n_classes not in (2, 3):
         raise ValueError('unsupported task shape')
     rng = rng if rng is not None else np.random.default_rng(seed)
@@ -56,4 +56,17 @@ def sample_task(n_rows=128, n_features=10, n_classes=3, prior='mixture', seed=No
         y = (risk >= np.quantile(risk, 1-prevalence)).astype(np.int64)
     else:
         y = np.digitize(risk, np.quantile(risk, [.48, .82])).astype(np.int64)
-    return x.astype(np.float32), y, {'source': 'synthetic', 'family': family, 'prior': prior}
+    # v2 class augmentation changes the numerical labels, not the risk function.
+    # Both generic and maternal tasks use the same policy. Single-pass
+    # class-equivariance is encouraged, not mathematically guaranteed.
+    flipped = False
+    if augment_feature_sign_flip and rng.random() < 0.5:
+        x = x * rng.choice([-1., 1.], size=n_features)[None, :]
+        flipped = True
+    label_mapping = rng.permutation(n_classes) if augment_class_permutation else np.arange(n_classes)
+    y = label_mapping[y]
+    meta = {'source': 'synthetic', 'family': family, 'prior': prior}
+    if augment_class_permutation or augment_feature_sign_flip:
+        meta.update({'class_mapping_original_to_augmented': label_mapping.tolist(),
+                     'sign_flip_task_selected': flipped})
+    return x.astype(np.float32), y, meta

@@ -35,6 +35,8 @@ def main():
     parser.add_argument("--full", action="store_true",
                         help="Run all context budgets and 20 draws per budget")
     parser.add_argument("--query-batch-size", type=int, default=8)
+    parser.add_argument("--symmetrize-classes", action="store_true")
+    parser.add_argument("--calibrate-context", action="store_true")
     args = parser.parse_args()
     if args.query_batch_size < 1:
         parser.error("query-batch-size must be positive")
@@ -59,6 +61,8 @@ def main():
         "max_draws": None if args.full else 1,
         "contexts": None if args.full else [16],
         "query_batch_size": args.query_batch_size,
+        "symmetrize_classes":args.symmetrize_classes,
+        "calibrate_context":args.calibrate_context,
         "checkpoints": {f"{t}_{p}": str(path) for (t,p),path in checkpoint_paths.items()},
         "synthetic_validation_is_not_clinical_validation": True,
         "observational_test_sets_are_not_for_model_selection": True,
@@ -90,6 +94,8 @@ def main():
                 output=csv_path, query_batch_size=args.query_batch_size,
                 max_draws=None if args.full else 1,
                 contexts=None if args.full else [16],
+                pfn_kwargs={"symmetrize_classes":args.symmetrize_classes,
+                            "calibrate_context":args.calibrate_context},
             )
             for metric in ("auroc", "accuracy", "brier", "ece15"):
                 import numpy as np

@@ -11,6 +11,7 @@ class ModelConfig:
     n_layers: int = 3
     mlp_hidden: int = 192
     max_classes: int = 3
+    architecture: str = 'post_ln_v1'
 
 class MissingnessFeatureEncoder(nn.Module):
     def __init__(self, d_model):
@@ -57,6 +58,7 @@ class BiAttentionBlock(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         d = cfg.d_model
+        self.architecture = cfg.architecture
         self.feat_attn = nn.MultiheadAttention(d, cfg.n_heads, batch_first=True)
         self.pat_attn = nn.MultiheadAttention(d, cfg.n_heads, batch_first=True)
         self.norm1 = nn.LayerNorm(d)
@@ -67,6 +69,17 @@ class BiAttentionBlock(nn.Module):
     def forward(self, e, n_train):
         b, n, cols, d = e.shape
         cells = e.reshape(b * n, cols, d)
+        if self.architecture == 'pre_ln_v2':
+            h = self.norm1(cells)
+            feat, _ = self.feat_attn(h, h, h, need_weights=False)
+            e = (cells + feat).reshape(b, n, cols, d)
+            pat = e.transpose(1, 2).reshape(b * cols, n, d)
+            h = self.norm2(pat)
+            update, _ = self.pat_attn(h, h[:, :n_train], h[:, :n_train], need_weights=False)
+            pat = pat + update
+            pat = pat + self.mlp(self.norm3(pat))
+            return pat.reshape(b, cols, n, d).transpose(1, 2)
+        # Restore exact Post-LN semantics for every old v1 checkpoint.
         feat, _ = self.feat_attn(cells, cells, cells, need_weights=False)
         e = self.norm1(cells + feat).reshape(b, n, cols, d)
         pat = e.transpose(1, 2).reshape(b * cols, n, d)
@@ -81,9 +94,14 @@ class NanoMaternalPFN(nn.Module):
         self.cfg = cfg or ModelConfig()
         if self.cfg.d_model % self.cfg.n_heads:
             raise ValueError('d_model must be divisible by n_heads')
+        if self.cfg.architecture not in ('post_ln_v1', 'pre_ln_v2'):
+            raise ValueError('Unknown model architecture version')
         self.feature_encoder = MissingnessFeatureEncoder(self.cfg.d_model)
         self.target_encoder = TargetEncoder(self.cfg.d_model, self.cfg.max_classes)
         self.layers = nn.ModuleList([BiAttentionBlock(self.cfg) for _ in range(self.cfg.n_layers)])
+        # Zero added trainable parameters; old checkpoint keys remain compatible.
+        self.final_norm = (nn.LayerNorm(self.cfg.d_model, elementwise_affine=False)
+                           if self.cfg.architecture == 'pre_ln_v2' else nn.Identity())
         self.decoder = nn.Sequential(nn.Linear(self.cfg.d_model, self.cfg.mlp_hidden), nn.GELU(), nn.Linear(self.cfg.mlp_hidden, self.cfg.max_classes))
 
     def forward(self, x, y_train, n_classes=None):
@@ -98,7 +116,7 @@ class NanoMaternalPFN(nn.Module):
         e = torch.cat([self.feature_encoder(x, n_ctx), self.target_encoder(y_train, x.shape[1] - n_ctx)], dim=2)
         for layer in self.layers:
             e = layer(e, n_ctx)
-        return self.decoder(e[:, n_ctx:, -1, :])[..., :n_classes]
+        return self.decoder(self.final_norm(e[:, n_ctx:, -1, :]))[..., :n_classes]
 
     def parameter_count(self):
         return sum(p.numel() for p in self.parameters())
