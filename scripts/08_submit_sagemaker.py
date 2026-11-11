@@ -8,7 +8,41 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
+import tempfile
 from pathlib import Path
+
+def stage_training_source(repository_root: Path, destination: Path) -> int:
+    """Copy *only* the files SageMaker needs, not local artifacts or .venv.
+
+    SDK source_dir includes directory contents, regardless of gitignore.
+    A bounded source bundle prevents hours-long accidental uploads.
+    """
+    root = Path(repository_root)
+    destination = Path(destination)
+    destination.mkdir(parents=True, exist_ok=True)
+    for name in ("sagemaker_train.py", "requirements.txt"):
+        shutil.copy2(root / name, destination / name)
+    shutil.copytree(
+        root / "src" / "nanomaternalpfn",
+        destination / "src" / "nanomaternalpfn",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store"),
+    )
+    scripts = destination / "scripts"
+    scripts.mkdir(exist_ok=True)
+    shutil.copy2(
+        root / "scripts" / "07_benchmark_sagemaker_a10g.py",
+        scripts / "07_benchmark_sagemaker_a10g.py",
+    )
+    total = sum(p.stat().st_size for p in destination.rglob("*") if p.is_file())
+    limit_bytes = 10 * 1024 * 1024
+    if total > limit_bytes:
+        raise ValueError(
+            f"Unexpected SageMaker source bundle size {total} bytes > {limit_bytes}"
+        )
+    print(f"Minimal SageMaker source bundle: {total / 1024:.1f} KiB", flush=True)
+    return total
+
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
@@ -69,7 +103,7 @@ def main():
     session=Session(boto_session=boto)
     kwargs=dict(
         entry_point="sagemaker_train.py",
-        source_dir=str(Path(__file__).resolve().parent.parent),
+        source_dir=None,
         role=args.role_arn,
         framework_version="2.5.1",
         py_version="py311",
@@ -94,12 +128,26 @@ def main():
         },
         environment={"OMP_NUM_THREADS":"4"},
     )
-    estimator=PyTorch(**kwargs)
-    job_prefix="nanomaternalpfn-v2" if args.variant=="v2" else f"nanomaternalpfn-{args.mode}"
-    estimator.fit(wait=False,logs=False,job_name=f"{job_prefix}-{__import__('datetime').datetime.now(__import__('datetime').timezone.utc):%Y%m%d-%H%M%S}")
-    print("JOB SUBMITTED:",estimator.latest_training_job.name)
-    print("Check: aws sagemaker describe-training-job --training-job-name",estimator.latest_training_job.name,
-          "--query TrainingJobStatus --output text")
+    # Keep the source directory alive until the SDK has uploaded it and
+    # create_training_job returns. No local virtualenv/artifacts are copied.
+    repository_root = Path(__file__).resolve().parent.parent
+    with tempfile.TemporaryDirectory(prefix="nanomaternalpfn-sm-src-") as temporary:
+        stage = Path(temporary)
+        stage_training_source(repository_root, stage)
+        kwargs["source_dir"] = str(stage)
+        estimator = PyTorch(**kwargs)
+        job_prefix = ("nanomaternalpfn-v2" if args.variant == "v2"
+                      else f"nanomaternalpfn-{args.mode}")
+        job_name = (
+            f"{job_prefix}-"
+            f"{__import__('datetime').datetime.now(__import__('datetime').timezone.utc):%Y%m%d-%H%M%S}"
+        )
+        print("Uploading compact source and submitting:", job_name, flush=True)
+        estimator.fit(wait=False, logs=False, job_name=job_name)
+        print("JOB SUBMITTED:", estimator.latest_training_job.name, flush=True)
+        print("Check: aws sagemaker describe-training-job --training-job-name",
+              estimator.latest_training_job.name,
+              "--query TrainingJobStatus --output text", flush=True)
 
 
 if __name__=="__main__":
