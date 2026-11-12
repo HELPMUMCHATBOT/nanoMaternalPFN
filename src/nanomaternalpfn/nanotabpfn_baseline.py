@@ -8,7 +8,6 @@ This is NOT an official pretrained nanoTabPFN checkpoint.
 from dataclasses import dataclass, asdict
 from pathlib import Path
 import json
-import math
 import random
 import shutil
 
@@ -174,7 +173,7 @@ def train_matched_nanotab(
         "train_prior":train_provenance, "validation_prior":val_provenance,
         "source":"automl/nanoTabPFN@6071eec58a1a3225854480125001d5a62e279f6d",
         "architecture":"upstream-nanotabpfn", "prior":prior,
-        "optimizer":"AdamW with linear warmup and cosine decay",
+        "optimizer":"AdamW fixed LR 5e-4 (Tiny v2 matched)",
         "lr_peak":0.0005, "seed":seed, "validation_seed":val_seed,
         "steps":steps, "batch_size":batch_size,
         "microbatch_size":microbatch_size,
@@ -219,14 +218,9 @@ def train_matched_nanotab(
         model.train()
         with HDF5TaskReplay(train_file) as replay, HDF5TaskReplay(val_file) as val:
             for step in range(start+1, steps+1):
-                warmup=250
-                if step<=warmup:
-                    factor=step/warmup
-                else:
-                    progress=min(1.0,(step-warmup)/max(1,steps-warmup))
-                    factor=.05+.95*.5*(1.+math.cos(math.pi*progress))
+                # Match the Tiny nanoMaternalPFN v2 AdamW peak LR and fixed schedule.
                 for group in optimizer.param_groups:
-                    group["lr"]=5e-4*factor
+                    group["lr"]=5e-4
                 optimizer.zero_grad(set_to_none=True)
                 total=0.
                 for _ in range(batch_size//microbatch_size):
