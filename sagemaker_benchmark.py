@@ -81,6 +81,11 @@ def main():
     from nanomaternalpfn.nanotabpfn_baseline import train_matched_nanotab
     ckpt=Path(args.checkpoint_dir)
     ckpt.mkdir(parents=True,exist_ok=True)
+    fingerprint=json.loads((input_dir/"input_manifest.json").read_text())
+    fingerprint_path=ckpt/"frozen_input_fingerprints.json"
+    if fingerprint_path.exists() and json.loads(fingerprint_path.read_text())!=fingerprint:
+        raise RuntimeError("Refusing checkpoint resume with changed frozen datasets or model weights")
+    fingerprint_path.write_text(json.dumps(fingerprint,sort_keys=True,indent=2)+"\n")
     for prior in ("generic","mixture"):
         training=train_matched_nanotab(
             workspace=work/"synthetic_prior",

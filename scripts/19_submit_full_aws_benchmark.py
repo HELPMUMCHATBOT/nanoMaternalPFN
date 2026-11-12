@@ -6,6 +6,7 @@ Only verified frozen manifests and four best v2 + two best v1 weights go to S3.
 """
 import argparse
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -58,14 +59,20 @@ def frozen_inputs(root,manifest_dir,v1_dir,v2_dir):
 def create_input_bundle(files,out):
     out=Path(out)
     out.parent.mkdir(parents=True,exist_ok=True)
+    fingerprints=[{"relative":relative,"sha256":sha256(path),
+                   "bytes":Path(path).stat().st_size}
+                  for path,relative in files]
     with tarfile.open(out,"w:gz") as tar:
         for path,relative in files:
             tar.add(path,arcname=relative,recursive=False)
+        marker=json.dumps(fingerprints,sort_keys=True,indent=2).encode()
+        info=tarfile.TarInfo("input_manifest.json")
+        info.size=len(marker)
+        info.mtime=0
+        tar.addfile(info,io.BytesIO(marker))
     return {
         "path":str(out),"sha256":sha256(out),
-        "files":[{"relative":relative,"sha256":sha256(path),
-                  "bytes":Path(path).stat().st_size}
-                 for path,relative in files],
+        "files":fingerprints,
     }
 
 
