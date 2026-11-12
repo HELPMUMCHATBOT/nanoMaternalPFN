@@ -19,7 +19,8 @@ def temperature_scale(probs, temperature):
 
 class AdaptiveNanoMaternalPFNClassifier:
     def __init__(self, checkpoints, query_batch_size=8, cv_folds=4,
-                 weight_sharpness=6.0, calibrate=True, estimator_factory=None):
+                 weight_sharpness=6.0, calibrate=True, estimator_factory=None,
+                 device='cpu'):
         if len(checkpoints) != 2:
             raise ValueError("expected exactly v1 and v2 checkpoints")
         if cv_folds < 2 or weight_sharpness <= 0:
@@ -30,6 +31,7 @@ class AdaptiveNanoMaternalPFNClassifier:
         self.weight_sharpness = float(weight_sharpness)
         self.calibrate = bool(calibrate)
         self.estimator_factory = estimator_factory
+        self.device = device
         self.experts_ = None
 
     def fit(self, X, y):
@@ -44,7 +46,7 @@ class AdaptiveNanoMaternalPFNClassifier:
         if self.experts_ is None:
             factory = self.estimator_factory or (
                 lambda p: NanoMaternalPFNClassifier(
-                    p, query_batch_size=self.query_batch_size
+                    p, device=self.device, query_batch_size=self.query_batch_size
                 )
             )
             self.experts_ = [factory(p) for p in self.checkpoints]
