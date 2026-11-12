@@ -99,11 +99,12 @@ def test_frozen_inputs_sha256_and_archive(tmp_path):
             "context_draws":{"4":[[0,1,2,3]]},
         }))
     for tier in ("tiny","base"):
-        (v1/f"{tier}_mixture.best.inference.pt").write_text("weights")
+        for prior in ("generic","mixture"):
+            (v1/f"{tier}_{prior}.best.inference.pt").write_text("weights")
         for prior in ("generic","mixture"):
             (v2/f"{tier}_{prior}.best.inference.pt").write_text("weights")
     files=launcher.frozen_inputs(tmp_path,manifest,v1,v2)
-    assert len(files)==22
+    assert len(files)==24
     metadata=launcher.create_input_bundle(files,tmp_path/"inputs.tar.gz")
     assert Path(metadata["path"]).is_file()
     assert metadata["sha256"]==launcher.sha256(metadata["path"])

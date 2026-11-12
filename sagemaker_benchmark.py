@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SageMaker entrypoint: train matched nanoTabPFN, evaluate all 13 arms, profile.
+"""SageMaker entrypoint: train matched nanoTabPFN, evaluate all 18 arms, profile.
 
 One GPU job, one frozen input bundle, checkpoint-backed resume.
 SageMaker checkpoint_s3_uri syncs /opt/ml/checkpoints between jobs.
