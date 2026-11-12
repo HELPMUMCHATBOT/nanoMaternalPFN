@@ -59,6 +59,8 @@ def measure(estimator,X,y,query,device,repeats):
     estimator.fit(X,y)
     estimator.predict_proba(query)
     fit=[], predict=[]
+    allocated_peaks=[]
+    reserved_peaks=[]
     for _ in range(repeats):
         if device=="cuda":
             torch.cuda.synchronize()
@@ -73,15 +75,16 @@ def measure(estimator,X,y,query,device,repeats):
         if device=="cuda":
             torch.cuda.synchronize()
         predict.append(1000*(time.perf_counter()-begin))
+        if device=="cuda":
+            allocated_peaks.append(float(torch.cuda.max_memory_allocated()/1e6))
+            reserved_peaks.append(float(torch.cuda.max_memory_reserved()/1e6))
     return {
         "fit_p50_ms":statistics.median(fit),
         "query_p50_ms":statistics.median(predict),
         "fit_plus_query_p50_ms":statistics.median([a+b for a,b in zip(fit,predict)]),
         "query_p99_ms":float(np.percentile(predict,99)),
-        "gpu_peak_reserved_mb":float(torch.cuda.max_memory_reserved()/1e6)
-            if device=="cuda" else None,
-        "gpu_peak_allocated_mb":float(torch.cuda.max_memory_allocated()/1e6)
-            if device=="cuda" else None,
+        "gpu_peak_reserved_mb":max(reserved_peaks) if reserved_peaks else None,
+        "gpu_peak_allocated_mb":max(allocated_peaks) if allocated_peaks else None,
     }
 
 

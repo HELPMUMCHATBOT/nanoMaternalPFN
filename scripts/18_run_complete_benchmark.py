@@ -42,7 +42,7 @@ METHODS = (
 RAW_FIELDS = (
     "dataset", "method", "context", "seed", "accuracy", "brier", "ece15",
     "auroc", "fit_ms", "predict_ms", "peak_gpu_allocated_mb",
-    "peak_gpu_reserved_mb", "max_process_rss_mb",
+    "peak_gpu_reserved_mb", "process_rss_mb",
 )
 METRICS = ("auroc", "accuracy", "brier", "ece15")
 SUMMARY_FIELDS = (
@@ -241,6 +241,7 @@ def main():
                 completed.add(key)
     failures=args.output_dir/"failures.jsonl"
     incomplete=0
+    expected=set()
     with raw_path.open("a",newline="") as handle:
         writer=csv.DictWriter(handle,fieldnames=RAW_FIELDS)
         if handle.tell()==0:
@@ -263,10 +264,11 @@ def main():
                         draws[:args.max_draws] if args.max_draws else draws
                     ):
                         key=(dataset,method,budget,seed)
-                        if key in completed:
-                            continue
                         draw=np.asarray(draw,dtype=np.int64)
                         if len(np.unique(y[draw]))<2:
+                            continue
+                        expected.add(key)
+                        if key in completed:
                             continue
                         if estimator is None or method in (
                             "logistic","random_forest","xgboost","lightgbm",
@@ -304,7 +306,7 @@ def main():
                                 "fit_ms":fit_ms,"predict_ms":predict_ms,
                                 "peak_gpu_allocated_mb":peak_alloc,
                                 "peak_gpu_reserved_mb":peak_reserved,
-                                "max_process_rss_mb":_rss_mb(),
+                                "process_rss_mb":_rss_mb(),
                             })
                             handle.flush()
                             os.fsync(handle.fileno())
@@ -332,6 +334,13 @@ def main():
                     del estimator
                     if args.device=="cuda":
                         torch.cuda.empty_cache()
+    missing=expected - completed
+    unexpected=completed - expected
+    if missing or unexpected:
+        raise RuntimeError(
+            f"Frozen benchmark incomplete/invalid: {len(missing)} missing, "
+            f"{len(unexpected)} unexpected results; do not publish."
+        )
     n_summary=summarize(raw_path,summary_path)
     runtime={
         "torch":torch.__version__,
