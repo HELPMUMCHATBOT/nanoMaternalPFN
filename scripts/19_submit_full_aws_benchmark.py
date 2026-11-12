@@ -81,7 +81,8 @@ def stage_source(root,out):
     )
     scripts=out/"scripts"
     scripts.mkdir(parents=True,exist_ok=True)
-    for name in ("18_run_complete_benchmark.py","20_profile_complete_models.py"):
+    for name in ("18_run_complete_benchmark.py","20_profile_complete_models.py",
+                 "22_analyze_paired_effects.py"):
         shutil.copy2(root/"scripts"/name,scripts/name)
     size=sum(p.stat().st_size for p in out.rglob("*") if p.is_file())
     if size>10*1024*1024:

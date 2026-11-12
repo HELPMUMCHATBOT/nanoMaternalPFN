@@ -119,6 +119,12 @@ def main():
         "--repeats","10",
     ]
     subprocess.run(profile_command,env=env,check=True)
+    analysis_command=[
+        sys.executable,str(HERE/"scripts"/"22_analyze_paired_effects.py"),
+        "--raw",str(metrics_dir/"all_draws.csv"),
+        "--output",str(metrics_dir/"paired_effects.csv"),
+    ]
+    subprocess.run(analysis_command,env=env,check=True)
     model_dir=Path(args.model_dir)
     model_dir.mkdir(parents=True,exist_ok=True)
     shutil.copytree(metrics_dir,model_dir/"paper_benchmark",dirs_exist_ok=True)
@@ -135,7 +141,7 @@ def main():
     (model_dir/"COMPLETE.json").write_text(
         json.dumps({
             "training":"completed", "benchmark":"completed",
-            "profiling":"completed", "models":18, "datasets":8,
+            "profiling":"completed", "paired_contrasts":"completed", "models":18, "datasets":8,
             "note":"exploratory; existing holdouts informed v2",
         },indent=2)+"\n"
     )

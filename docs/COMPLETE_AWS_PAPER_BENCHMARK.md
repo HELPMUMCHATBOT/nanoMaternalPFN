@@ -99,3 +99,12 @@ in the nanoTabPFN adaptation is a documented input compatibility choice.
 For confirmatory conference claims, add an independent locked external
 validation and isolate pretraining architecture/optimizer/augmentation changes
 in controlled ablation experiments.
+
+### Prespecified paired effects
+
+The job also generates `paper_benchmark/paired_effects.csv` and a metadata
+JSON file: 11 fixed methodological contrasts across all eligible datasets,
+contexts and four metrics. It reports mean paired effects and deterministic
+percentile-bootstrap intervals across matched context draws. These intervals
+are **not patient-level or independent-cohort confidence intervals** and cannot
+resolve the reuse of previously examined test data.
