@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Complete, resumable frozen-cohort benchmark across 13 model configurations.
+"""Complete, resumable frozen-cohort benchmark across 18 model configurations.
 
 All datasets, context draws, and endpoints are preserved exactly. Model choices
 and score reporting are exploratory because earlier holdouts informed v2 design.
@@ -30,6 +30,8 @@ DATASETS = (
     "cardiotocography", "pima_diabetes", "tpehg_preterm",
     "ctu_cord_acidemia",
 )
+PFN_ARMS = ("tiny_generic", "tiny_mixture", "base_generic", "base_mixture")
+V1_ARMS = tuple("v1_"+name for name in PFN_ARMS)
 METHODS = (
     "logistic", "random_forest", "xgboost", "lightgbm",
     "nanotabpfn_generic", "nanotabpfn_mixture",
@@ -37,8 +39,6 @@ METHODS = (
     "tiny_generic", "tiny_mixture", "base_generic", "base_mixture",
     *V1_ARMS, "adaptive_tiny", "adaptive_base",
 )
-PFN_ARMS = ("tiny_generic", "tiny_mixture", "base_generic", "base_mixture")
-V1_ARMS = tuple("v1_"+name for name in PFN_ARMS)
 RAW_FIELDS = (
     "dataset", "method", "context", "seed", "accuracy", "brier", "ece15",
     "auroc", "fit_ms", "predict_ms", "peak_gpu_allocated_mb",
