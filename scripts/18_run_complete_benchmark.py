@@ -272,7 +272,6 @@ def main():
                             continue
                         if estimator is None or method in (
                             "logistic","random_forest","xgboost","lightgbm",
-                            "tabpfn_v2_single","tabpfn_v2_default",
                         ):
                             estimator=make_estimator(
                                 method,args.input_dir,args.device,seed,args.query_batch_size
