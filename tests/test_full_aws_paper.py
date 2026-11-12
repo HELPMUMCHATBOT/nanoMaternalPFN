@@ -131,3 +131,53 @@ def test_full_benchmark_scores_and_class_alignment(tmp_path):
 def test_SageMaker_input_extraction_guards_paths(tmp_path):
     entry=import_script("sagemaker_benchmark","19_submit_full_aws_benchmark.py")
     assert callable(entry.stage_source)
+
+
+def test_end_to_end_frozen_cpu_with_retrained_reference(tmp_path):
+    """Run real evaluation CLI over one synthetic test fixture, no clinical claims."""
+    import subprocess
+    import sys
+    from dataclasses import asdict
+    manifest_dir=tmp_path/"inputs"/"manifests"
+    checkpoint_dir=tmp_path/"inputs"/"checkpoints"
+    manifest_dir.mkdir(parents=True)
+    checkpoint_dir.mkdir(parents=True)
+    rng=np.random.default_rng(909)
+    X=rng.normal(size=(60,5)).astype(np.float32)
+    X[1,2]=np.nan
+    y=np.asarray([0,1,2]*20,dtype=np.int64)
+    npz=manifest_dir/"uci_maternal_risk.npz"
+    np.savez(npz,X=X,y=y)
+    manifest={
+        "sha256":hashlib.sha256(npz.read_bytes()).hexdigest(),
+        "test_idx":list(range(36,60)),
+        "context_draws":{"16":[list(range(16))]},
+    }
+    (manifest_dir/"uci_maternal_risk.json").write_text(json.dumps(manifest))
+    cfg=NanoTabConfig()
+    net=new_nanotab(cfg).eval()
+    torch.save({
+        "config":asdict(cfg),"state_dict":net.state_dict(),
+        "synthetic_only":True,"prior":"generic_v2",
+    },checkpoint_dir/"nanotabpfn_generic.best.inference.pt")
+    command=[
+        sys.executable,str(ROOT/"scripts"/"18_run_complete_benchmark.py"),
+        "--input-dir",str(tmp_path/"inputs"),
+        "--output-dir",str(tmp_path/"results"),
+        "--datasets","uci_maternal_risk",
+        "--methods","logistic","nanotabpfn_generic",
+        "--contexts","16","--max-draws","1","--device","cpu",
+        "--query-batch-size","8",
+    ]
+    subprocess.run(command,check=True,capture_output=True,text=True)
+    import pandas as pd
+    summary=pd.read_csv(tmp_path/"results"/"summary.csv")
+    raw=pd.read_csv(tmp_path/"results"/"all_draws.csv")
+    assert len(raw)==2
+    assert set(raw["method"])=={"logistic","nanotabpfn_generic"}
+    assert len(summary)==8
+    assert np.isfinite(raw["brier"]).all()
+    # The resume path must not duplicate observations.
+    subprocess.run(command,check=True,capture_output=True,text=True)
+    raw_again=pd.read_csv(tmp_path/"results"/"all_draws.csv")
+    assert len(raw_again)==2
