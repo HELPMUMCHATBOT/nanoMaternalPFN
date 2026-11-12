@@ -13,6 +13,7 @@ from sklearn.metrics import accuracy_score, roc_auc_score
 from .baselines import get_baseline
 from .calibration import multiclass_brier, ece
 from ..classifier import NanoMaternalPFNClassifier
+from ..adaptive_classifier import AdaptiveNanoMaternalPFNClassifier
 
 
 FIELDS = ("method", "context", "seed", "accuracy", "brier", "ece15", "auroc")
@@ -22,6 +23,8 @@ def evaluate(
     manifest_path, checkpoint=None, methods=("logistic", "random_forest"),
     output="artifacts/results/transfer.csv", query_batch_size=16,
     max_draws=None, contexts=None, pfn_kwargs=None,
+    adaptive_checkpoints=None, adaptive_kwargs=None, baseline_kwargs=None,
+    resume=False,
 ):
     """Evaluate all applicable frozen contexts against one fixed test pool.
 
@@ -48,17 +51,42 @@ def evaluate(
     skipped = []
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    # Reusing a single preloaded PFN per method avoids repeated weight I/O.
-    with output.open("w", newline="") as file:
+    existing_keys = set()
+    if resume and output.exists():
+        with output.open(newline="") as previous:
+            reader = csv.DictReader(previous)
+            if tuple(reader.fieldnames or ()) != FIELDS:
+                raise ValueError(f"Unexpected resume CSV schema: {output}")
+            for old in reader:
+                row = {}
+                for field in FIELDS:
+                    row[field] = (int(old[field]) if field in ("context", "seed")
+                                  else float(old[field]) if field in
+                                  ("auroc", "accuracy", "brier", "ece15")
+                                  else old[field])
+                key = (row["method"], row["context"], row["seed"])
+                if key in existing_keys:
+                    raise ValueError(f"Duplicate row in {output}: {key}")
+                existing_keys.add(key)
+                results.append(row)
+    mode = "a" if resume and output.exists() else "w"
+    with output.open(mode, newline="") as file:
         writer = csv.DictWriter(file, fieldnames=FIELDS)
-        writer.writeheader()
+        if mode == "w":
+            writer.writeheader()
         for method in methods:
             if method == "pfn" and not checkpoint:
                 raise ValueError("pretrained checkpoint required for PFN comparison")
+            if method == "adaptive" and not adaptive_checkpoints:
+                raise ValueError("adaptive method needs two checkpoints")
             pfn = (NanoMaternalPFNClassifier(
                 checkpoint, query_batch_size=query_batch_size,
                 **(pfn_kwargs or {})
             ) if method == "pfn" else None)
+            adaptive = (AdaptiveNanoMaternalPFNClassifier(
+                adaptive_checkpoints, query_batch_size=query_batch_size,
+                **(adaptive_kwargs or {})
+            ) if method == "adaptive" else None)
             for budget, all_draws in sorted(
                 manifest["context_draws"].items(), key=lambda kv: int(kv[0])
             ):
@@ -66,6 +94,8 @@ def evaluate(
                     continue
                 draws = all_draws[:max_draws] if max_draws else all_draws
                 for seed, draw in enumerate(draws):
+                    if (method, int(budget), seed) in existing_keys:
+                        continue
                     draw = np.asarray(draw, dtype=int)
                     if len(np.unique(y[draw])) < 2:
                         skipped.append({
@@ -73,8 +103,18 @@ def evaluate(
                             "seed": seed, "reason": "single_context_class",
                         })
                         continue
-                    estimator = pfn if pfn is not None else get_baseline(method, seed)
+                    estimator = (pfn if pfn is not None else
+                                 adaptive if adaptive is not None else
+                                 get_baseline(method, seed, **(baseline_kwargs or {})))
                     estimator.fit(X[draw], y[draw])
+                    if adaptive is not None:
+                        diag_path = output.with_suffix(".adaptive_diagnostics.jsonl")
+                        with diag_path.open("a") as handle:
+                            handle.write(json.dumps({
+                                "dataset": manifest_path.stem,
+                                "context": int(budget), "seed": seed,
+                                **estimator.diagnostics_,
+                            }, sort_keys=True) + "\n")
                     pred = estimator.predict_proba(X[test])
                     aligned = np.zeros((len(test), len(classes)))
                     for j, c in enumerate(estimator.classes_):
