@@ -42,7 +42,7 @@ def frozen_inputs(root,manifest_dir,v1_dir,v2_dir):
             (meta,f"manifests/{name}.json"),
             (data,f"manifests/{name}.npz"),
         ])
-    for name in ("tiny_mixture","base_mixture"):
+    for name in ("tiny_generic","tiny_mixture","base_generic","base_mixture"):
         src=v1_dir/f"{name}.best.inference.pt"
         if not src.is_file():
             raise FileNotFoundError(src)
@@ -117,7 +117,7 @@ def main():
     print(json.dumps({
         "submit":args.submit,"instance":args.instance_type,
         "region":args.region,
-        "models":13,"datasets":len(DATASETS),
+        "models":18,"datasets":len(DATASETS),
         "contexts":[16,32,64,128,256,512],
         "draws_per_context":20,
         "nanotab_training_steps":args.steps,

@@ -81,18 +81,20 @@ def main():
     from nanomaternalpfn.nanotabpfn_baseline import train_matched_nanotab
     ckpt=Path(args.checkpoint_dir)
     ckpt.mkdir(parents=True,exist_ok=True)
-    training=train_matched_nanotab(
-        workspace=work/"synthetic_prior",
-        checkpoint_dir=ckpt/"nanotab_pretrain",
-        steps=args.steps, batch_size=args.batch_size,
-        microbatch_size=args.microbatch_size,
-        num_tables=args.num_tables,
-        val_tables=args.validation_tables,device=args.device,
-        validate_every=args.validate_every,max_context=args.max_context,
-    )
-    copy_dest=input_dir/"checkpoints"/"nanotabpfn_generic.best.inference.pt"
-    copy_dest.parent.mkdir(parents=True,exist_ok=True)
-    shutil.copy2(training["checkpoint"],copy_dest)
+    for prior in ("generic","mixture"):
+        training=train_matched_nanotab(
+            workspace=work/"synthetic_prior",
+            checkpoint_dir=ckpt/"nanotab_pretrain",
+            steps=args.steps,batch_size=args.batch_size,
+            microbatch_size=args.microbatch_size,
+            num_tables=args.num_tables,
+            val_tables=args.validation_tables,device=args.device,
+            validate_every=args.validate_every,max_context=args.max_context,
+            prior=prior,
+        )
+        dest=input_dir/"checkpoints"/f"nanotabpfn_{prior}.best.inference.pt"
+        dest.parent.mkdir(parents=True,exist_ok=True)
+        shutil.copy2(training["checkpoint"],dest)
     # Frozen inputs are never modified, but locally staged copy receives
     # the newly trained, held-out-synthetic-selected nanoTabPFN weights.
     metrics_dir=ckpt/"paper_benchmark_results"
@@ -120,18 +122,20 @@ def main():
     model_dir=Path(args.model_dir)
     model_dir.mkdir(parents=True,exist_ok=True)
     shutil.copytree(metrics_dir,model_dir/"paper_benchmark",dirs_exist_ok=True)
-    shutil.copy2(
-        ckpt/"nanotab_pretrain"/"training_results.json",
-        model_dir/"nanotab_training_results.json"
-    )
-    shutil.copy2(
-        ckpt/"nanotab_pretrain"/"training_protocol.json",
-        model_dir/"nanotab_training_protocol.json"
-    )
+    for prior in ("generic","mixture"):
+        for kind in ("training_results","training_protocol"):
+            shutil.copy2(
+                ckpt/"nanotab_pretrain"/f"{kind}_{prior}.json",
+                model_dir/f"nanotab_{kind}_{prior}.json"
+            )
+        shutil.copy2(
+            ckpt/"nanotab_pretrain"/f"nanotabpfn_{prior}.best.inference.pt",
+            model_dir/f"nanotabpfn_{prior}.best.inference.pt"
+        )
     (model_dir/"COMPLETE.json").write_text(
         json.dumps({
             "training":"completed", "benchmark":"completed",
-            "profiling":"completed", "models":13, "datasets":8,
+            "profiling":"completed", "models":18, "datasets":8,
             "note":"exploratory; existing holdouts informed v2",
         },indent=2)+"\n"
     )

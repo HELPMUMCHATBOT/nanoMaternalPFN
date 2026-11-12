@@ -2,7 +2,7 @@
 
 **Title:** nanoMaternalPFN: A Lightweight Tabular Foundation Model for Maternal Health Prediction
 
-**One SageMaker A10G job. Thirteen methods. Eight frozen real datasets.**
+**One SageMaker A10G job. Eighteen methods. Eight frozen real datasets.**
 No local GPU compute is required. The MacBook stages files and submits the job.
 This uses the existing AWS account, \`us-east-1\`, \`ml.g5.2xlarge\` (A10G
 24 GB), and IAM SageMaker execution role.
@@ -10,10 +10,10 @@ This uses the existing AWS account, \`us-east-1\`, \`ml.g5.2xlarge\` (A10G
 ## Methods (13, all required)
 
 - Logistic Regression, Random Forest, XGBoost, LightGBM
-- **nanoTabPFN:** pinned upstream architecture at automl/nanoTabPFN
+- **nanoTabPFN (generic and maternal-mixture prior):** pinned upstream architecture at automl/nanoTabPFN
   commit \`6071eec58a1a3225854480125001d5a62e279f6d\`
   (Apache-2.0; preserved verbatim and attributed), trained **from scratch**
-  on our independently generated **generic v2 synthetic prior**.
+  on our independently generated **generic and maternal-mixture v2 synthetic priors**.
   200,000 synthetic tasks, 5,000 optimization steps, effective batch 32.
   It uses the original alternating feature/patient attention architecture,
   with context-only missing-value imputation necessary for NaNs.
@@ -21,7 +21,7 @@ This uses the existing AWS account, \`us-east-1\`, \`ml.g5.2xlarge\` (A10G
   pretrained nanoTabPFN.
 - Official Prior Labs TabPFN V2, one estimator and version default ensemble
   (explicit \`ModelVersion.V2\`; tabpfn 9.2.0 pinned).
-- nanoMaternalPFN v2 Tiny/Base x Generic/Maternal Mixture (four arms).
+- nanoMaternalPFN v1 and v2 Tiny/Base x Generic/Maternal Mixture (eight arms).
 - Context-only v1/v2 maternal expert ensemble at Tiny and Base tiers.
 
 ## Primary evaluation
@@ -56,8 +56,8 @@ python scripts/19_submit_full_aws_benchmark.py --submit
 ~~~
 
 The command verifies and bundles **8 × JSON/NPZ frozen datasets**,
-**2 v1 maternal** and **4 v2** pretrained weights. It rejects missing files
-and SHA256 mismatches. It uploads only those 22 inputs to S3 and only the
+**4 v1** and **4 v2** pretrained weights. It rejects missing files
+and SHA256 mismatches. It uploads only those 24 inputs to S3 and only the
 minimal source bundle (not \`.venv\`, not raw data folders, not other artifacts).
 
 Job uses \`ml.g5.2xlarge\`, 80 GB EBS, and 48-hour requested max duration.

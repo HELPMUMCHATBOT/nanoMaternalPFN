@@ -22,17 +22,23 @@ from nanomaternalpfn.nanotabpfn_baseline import NanoTabPFNReferenceClassifier
 from nanomaternalpfn.evaluation.baselines import get_baseline
 
 ARMS = ("tiny_generic","tiny_mixture","base_generic","base_mixture")
+V1_ARMS = tuple("v1_"+name for name in ARMS)
 METHODS = ("logistic","random_forest","xgboost","lightgbm",
-           "nanotabpfn_generic","tabpfn_v2_single","tabpfn_v2_default",
-           *ARMS,"adaptive_tiny","adaptive_base")
+           "nanotabpfn_generic","nanotabpfn_mixture","tabpfn_v2_single","tabpfn_v2_default",
+           *ARMS,*V1_ARMS,"adaptive_tiny","adaptive_base")
 
 
 def estimator(method,root,device):
     ckpt=root/"checkpoints"
-    if method=="nanotabpfn_generic":
+    if method in ("nanotabpfn_generic","nanotabpfn_mixture"):
         return NanoTabPFNReferenceClassifier(
-            ckpt/"nanotabpfn_generic.best.inference.pt",
+            ckpt/f"{method}.best.inference.pt",
             device=device, query_batch_size=1,
+        )
+    if method in V1_ARMS:
+        return NanoMaternalPFNClassifier(
+            ckpt/"v1"/f"{method[3:]}.best.inference.pt",
+            device=device,query_batch_size=1,
         )
     if method in ARMS:
         return NanoMaternalPFNClassifier(

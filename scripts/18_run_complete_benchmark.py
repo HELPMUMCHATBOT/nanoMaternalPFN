@@ -32,12 +32,13 @@ DATASETS = (
 )
 METHODS = (
     "logistic", "random_forest", "xgboost", "lightgbm",
-    "nanotabpfn_generic",
+    "nanotabpfn_generic", "nanotabpfn_mixture",
     "tabpfn_v2_single", "tabpfn_v2_default",
     "tiny_generic", "tiny_mixture", "base_generic", "base_mixture",
-    "adaptive_tiny", "adaptive_base",
+    *V1_ARMS, "adaptive_tiny", "adaptive_base",
 )
 PFN_ARMS = ("tiny_generic", "tiny_mixture", "base_generic", "base_mixture")
+V1_ARMS = tuple("v1_"+name for name in PFN_ARMS)
 RAW_FIELDS = (
     "dataset", "method", "context", "seed", "accuracy", "brier", "ece15",
     "auroc", "fit_ms", "predict_ms", "peak_gpu_allocated_mb",
@@ -78,10 +79,15 @@ def load_manifest(path):
 
 def make_estimator(method, root, device, seed, query_batch_size):
     ckpts = root / "checkpoints"
-    if method == "nanotabpfn_generic":
+    if method in ("nanotabpfn_generic","nanotabpfn_mixture"):
         return NanoTabPFNReferenceClassifier(
-            ckpts / "nanotabpfn_generic.best.inference.pt",
+            ckpts / f"{method}.best.inference.pt",
             device=device, query_batch_size=query_batch_size,
+        )
+    if method in V1_ARMS:
+        return NanoMaternalPFNClassifier(
+            ckpts / "v1" / f"{method[3:]}.best.inference.pt",
+            device=device,query_batch_size=query_batch_size,
         )
     if method in PFN_ARMS:
         return NanoMaternalPFNClassifier(

@@ -67,7 +67,7 @@ class NanoTabPFNReferenceClassifier:
             raise ValueError("nanoTabPFN supports exactly 2/3 observed classes")
         if self.model is None:
             state = torch.load(self.checkpoint, map_location="cpu", weights_only=True)
-            if not state.get("synthetic_only") or state.get("prior") != "generic_v2":
+            if not state.get("synthetic_only") or state.get("prior") not in ("generic_v2","mixture_v2"):
                 raise ValueError("Expected matched generic-v2 nanoTabPFN checkpoint")
             self.model = new_nanotab(state["config"])
             self.model.load_state_dict(state["state_dict"], strict=True)
@@ -144,9 +144,11 @@ def train_matched_nanotab(
     batch_size=32, microbatch_size=8,
     num_tables=200000, val_tables=512,
     device="cuda", seed=20261107, val_seed=20271008,
-    validate_every=250, max_context=512,
+    validate_every=250, max_context=512, prior="generic",
 ):
     """Match our v2 generic-prior task and optimizer budgets on upstream model."""
+    if prior not in ("generic","mixture"):
+        raise ValueError("Unsupported nanoTabPFN prior")
     if batch_size % microbatch_size or val_seed == seed:
         raise ValueError("invalid batch accumulation or validation seed")
     if max_context < 16 or steps < 1:
@@ -154,10 +156,10 @@ def train_matched_nanotab(
     workspace, checkpoint_dir = Path(workspace), Path(checkpoint_dir)
     workspace.mkdir(parents=True, exist_ok=True)
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    train_file = workspace / "nanotab_generic_v2_train.h5"
-    val_file = workspace / "nanotab_generic_v2_validation.h5"
+    train_file = workspace / f"nanotab_{prior}_v2_train.h5"
+    val_file = workspace / f"nanotab_{prior}_v2_validation.h5"
     replay_args = dict(
-        prior="generic", min_rows=32, max_rows=576,
+        prior=prior, min_rows=32, max_rows=576,
         min_features=5, max_features=16, variant="v2",
     )
     train_provenance = create_replay(
@@ -171,7 +173,7 @@ def train_matched_nanotab(
     manifest = {
         "train_prior":train_provenance, "validation_prior":val_provenance,
         "source":"automl/nanoTabPFN@6071eec58a1a3225854480125001d5a62e279f6d",
-        "architecture":"upstream-nanotabpfn",
+        "architecture":"upstream-nanotabpfn", "prior":prior,
         "optimizer":"AdamW with linear warmup and cosine decay",
         "lr_peak":0.0005, "seed":seed, "validation_seed":val_seed,
         "steps":steps, "batch_size":batch_size,
@@ -179,7 +181,7 @@ def train_matched_nanotab(
         "max_context":max_context, "query_rows":8,
         "validate_every":validate_every, "synthetic_only":True,
     }
-    (checkpoint_dir/"training_protocol.json").write_text(
+    (checkpoint_dir/f"training_protocol_{prior}.json").write_text(
         json.dumps(manifest, indent=2)+"\n"
     )
     config=NanoTabConfig()
@@ -188,8 +190,8 @@ def train_matched_nanotab(
     random.seed(seed)
     model=new_nanotab(config).to(device)
     optimizer=torch.optim.AdamW(model.parameters(),lr=5e-4,weight_decay=.01)
-    latest=checkpoint_dir/"nanotabpfn_generic.train.pt"
-    best=checkpoint_dir/"nanotabpfn_generic.best.inference.pt"
+    latest=checkpoint_dir/f"nanotabpfn_{prior}.train.pt"
+    best=checkpoint_dir/f"nanotabpfn_{prior}.best.inference.pt"
     history=[]
     start=0
     best_val=float("inf")
@@ -253,7 +255,7 @@ def train_matched_nanotab(
                             "config":asdict(config),
                             "state_dict":model.state_dict(),
                             "step":step, "validation_loss":score,
-                            "prior":"generic_v2", "synthetic_only":True,
+                            "prior":f"{prior}_v2", "synthetic_only":True,
                             "upstream_sha":"6071eec58a1a3225854480125001d5a62e279f6d",
                         },best.with_suffix(".tmp"))
                         best.with_suffix(".tmp").replace(best)
@@ -286,7 +288,7 @@ def train_matched_nanotab(
         "generic_prior_only":True,"training_protocol":manifest,
         "validation_history":history,
     }
-    (checkpoint_dir/"training_results.json").write_text(
+    (checkpoint_dir/f"training_results_{prior}.json").write_text(
         json.dumps(summary,indent=2)+"\n"
     )
     return summary
