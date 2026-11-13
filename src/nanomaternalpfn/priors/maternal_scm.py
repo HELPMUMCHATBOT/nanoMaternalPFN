@@ -3,7 +3,7 @@ import numpy as np
 
 FAMILIES = ('hypertension', 'metabolic', 'history', 'messy')
 
-def sample_task(n_rows=128, n_features=10, n_classes=3, prior='mixture', seed=None, rng=None, maternal_probability=0.7, augment_class_permutation=False, augment_feature_sign_flip=False):
+def sample_task(n_rows=128, n_features=10, n_classes=3, prior='mixture', seed=None, rng=None, maternal_probability=0.7, augment_class_permutation=False, augment_feature_sign_flip=False, robust=False):
     if n_rows < 8 or not 2 <= n_features <= 32 or n_classes not in (2, 3):
         raise ValueError('unsupported task shape')
     rng = rng if rng is not None else np.random.default_rng(seed)
@@ -40,6 +40,14 @@ def sample_task(n_rows=128, n_features=10, n_classes=3, prior='mixture', seed=No
         metab = .3 * np.maximum(0, glucose-5.5) * np.maximum(0, bmi-25)/5
         coeffs = {'hypertension':(1.8,.8,.5,1), 'metabolic':(.7,2,.5,.7), 'history':(.5,.5,2,1), 'messy':(1,1,1,1)}[family]
         risk = coeffs[0]*bp_curve + coeffs[1]*metab + coeffs[2]*history + coeffs[3]*age_curve + rng.normal(0,.8,n_rows)
+        if robust:
+            # Hypothetical hospital shift and nonlinear interactions.
+            site = rng.integers(0, 3, n_rows)
+            risk += rng.normal(0, .5, 3)[site]
+            risk += rng.uniform(-.5, .5) * np.tanh((sbp-135)/20) * np.tanh((glucose-5.5)/3)
+            if n_features >= 4:
+                x[:, 2] += rng.normal(0, 3, 3)[site]
+                x[:, 3] += rng.normal(0, 2, 3)[site]
         if n_features >= 4 and rng.random() < .65:
             heaped = rng.random(n_rows) < .6
             x[heaped, 2:4] = np.round(x[heaped, 2:4]/5)*5
@@ -50,12 +58,24 @@ def sample_task(n_rows=128, n_features=10, n_classes=3, prior='mixture', seed=No
             threshold = np.quantile(risk, .80 if rng.random() < .5 else .20)
             mnar = ((risk > threshold) if rng.random() < .5 else (risk < threshold)) & (rng.random(n_rows) < .3)
             x[mnar, 5] = np.nan
+        if robust:
+            # MAR-style missingness and heavy-tailed simulated measurement errors.
+            p_missing = np.clip(.02 + .35 / (1 + np.exp(-np.clip((sbp-135)/15, -10, 10))), .02, .48)
+            missing_col = int(rng.integers(n_features))
+            x[rng.random(n_rows) < p_missing, missing_col] = np.nan
+            corrupted = rng.random(x.shape) < rng.uniform(.005, .03)
+            x[corrupted] += rng.standard_t(3, x.shape)[corrupted] * 2
         x = x[:, rng.permutation(n_features)]
     if n_classes == 2:
-        prevalence = rng.uniform(.1, .48)
+        prevalence = rng.uniform(.015, .48) if robust else rng.uniform(.1, .48)
         y = (risk >= np.quantile(risk, 1-prevalence)).astype(np.int64)
     else:
         y = np.digitize(risk, np.quantile(risk, [.48, .82])).astype(np.int64)
+    if robust:
+        noise_mask = rng.random(n_rows) < rng.uniform(0, .12)
+        count = int(noise_mask.sum())
+        if count:
+            y[noise_mask] = (y[noise_mask] + rng.integers(1, n_classes, size=count)) % n_classes
     # v2 class augmentation changes the numerical labels, not the risk function.
     # Both generic and maternal tasks use the same policy. Single-pass
     # class-equivariance is encouraged, not mathematically guaranteed.
@@ -65,7 +85,7 @@ def sample_task(n_rows=128, n_features=10, n_classes=3, prior='mixture', seed=No
         flipped = True
     label_mapping = rng.permutation(n_classes) if augment_class_permutation else np.arange(n_classes)
     y = label_mapping[y]
-    meta = {'source': 'synthetic', 'family': family, 'prior': prior}
+    meta = {'source': 'synthetic', 'family': family, 'prior': prior, 'robust': bool(robust)}
     if augment_class_permutation or augment_feature_sign_flip:
         meta.update({'class_mapping_original_to_augmented': label_mapping.tolist(),
                      'sign_flip_task_selected': flipped})
