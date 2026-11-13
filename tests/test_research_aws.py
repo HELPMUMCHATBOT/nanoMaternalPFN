@@ -36,6 +36,6 @@ def test_research_aws_launcher_dry_run_no_credentials_needed():
         "--role-arn","arn:aws:iam::000000000000:role/TestRole",
     ]
     proc=subprocess.run(cmd,capture_output=True,text=True,check=True)
-    assert '"experiment_count": 80' in proc.stdout
+    assert '"experiment_count": 160' in proc.stdout
     assert '"billable_job_submission": false' in proc.stdout
     assert "DRY RUN" in proc.stdout
