@@ -21,6 +21,10 @@ ARMS = ("tiny_generic", "tiny_mixture", "base_generic", "base_mixture")
 ORIGINAL = ("logistic", "random_forest") + ARMS
 PAPER = ("xgboost", "lightgbm", "tabpfn_v2_single", "tabpfn_v2_default",
          "adaptive_tiny", "adaptive_base")
+RESEARCH_ADAPTIVE = tuple(
+    f"adaptive_{tier}_{kind}" for tier in ("tiny", "base")
+    for kind in ("three", "four")
+)
 SUMMARY_FIELDS = ("dataset", "method", "context", "metric",
                   "n_valid_draws", "mean", "sd_between_context_draws")
 
@@ -36,7 +40,7 @@ def main():
                    default=Path("artifacts/results/downstream_pilot"))
     p.add_argument("--datasets", nargs="+", choices=DEFAULT_DATASETS,
                    default=list(DEFAULT_DATASETS))
-    p.add_argument("--methods", nargs="+", choices=ORIGINAL + PAPER,
+    p.add_argument("--methods", nargs="+", choices=ORIGINAL + PAPER + RESEARCH_ADAPTIVE,
                    default=list(ORIGINAL))
     p.add_argument("--full", action="store_true")
     p.add_argument("--max-draws", type=int, default=None)
@@ -48,6 +52,7 @@ def main():
     p.add_argument("--calibrate-context", action="store_true")
     p.add_argument("--no-adaptive-calibration", action="store_true")
     p.add_argument("--resume", action="store_true")
+    p.add_argument("--adaptive-weighting", choices=("softmax", "winner", "uniform"), default="softmax")
     args = p.parse_args()
     if args.query_batch_size < 1 or (
         args.max_draws is not None and args.max_draws < 1
@@ -75,6 +80,16 @@ def main():
             args.checkpoint_dir / f"{tier}_mixture.best.inference.pt",
         ) for tier in ("tiny", "base")
     }
+    for tier in ("tiny", "base"):
+        adaptive[f"adaptive_{tier}_three"] = (
+            args.v1_checkpoint_dir / f"{tier}_mixture.best.inference.pt",
+            args.checkpoint_dir / f"{tier}_mixture.best.inference.pt",
+            args.checkpoint_dir / f"{tier}_generic.best.inference.pt",
+        )
+        adaptive[f"adaptive_{tier}_four"] = (
+            *adaptive[f"adaptive_{tier}_three"],
+            args.v1_checkpoint_dir / f"{tier}_generic.best.inference.pt",
+        )
     for method in args.methods:
         for filename in (
             adaptive[method] if method in adaptive else
@@ -99,6 +114,7 @@ def main():
         "symmetrize_classes":args.symmetrize_classes,
         "calibrate_context":args.calibrate_context,
         "adaptive_calibrate":not args.no_adaptive_calibration,
+        "adaptive_weighting": args.adaptive_weighting,
         "checkpoints":{
             m:str(checkpoints[m]) for m in args.methods if m in checkpoints
         },
@@ -142,6 +158,7 @@ def main():
                 adaptive_checkpoints=adaptive.get(method),
                 adaptive_kwargs={
                     "calibrate":not args.no_adaptive_calibration,
+                    "weighting":args.adaptive_weighting,
                 },
                 baseline_kwargs={"tabpfn_device":args.tabpfn_device},
                 resume=args.resume,

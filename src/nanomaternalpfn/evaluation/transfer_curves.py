@@ -78,7 +78,7 @@ def evaluate(
             if method == "pfn" and not checkpoint:
                 raise ValueError("pretrained checkpoint required for PFN comparison")
             if method == "adaptive" and not adaptive_checkpoints:
-                raise ValueError("adaptive method needs two checkpoints")
+                raise ValueError("adaptive method needs 2-8 checkpoints")
             pfn = (NanoMaternalPFNClassifier(
                 checkpoint, query_batch_size=query_batch_size,
                 **(pfn_kwargs or {})

@@ -1,16 +1,21 @@
-"""Context-only ensemble of pretrained v1 and v2 maternal PFN experts.
+"""Context-only weighted ensemble of two or more frozen PFN checkpoints.
 
-No test/query data or labels determine weights or temperature. This is a
-two-checkpoint ensemble, not a single tiny PFN with unchanged latency/RAM.
+Expert selection and calibration use ONLY labeled context folds. Query records
+or query labels never participate in selection. Ensemble accuracy cannot be
+attributed to the standalone inference footprint of one checkpoint.
 """
 from pathlib import Path
+
 import numpy as np
 from scipy.optimize import minimize_scalar
 from sklearn.model_selection import StratifiedKFold
+
 from .classifier import NanoMaternalPFNClassifier
 
 
 def temperature_scale(probs, temperature):
+    if temperature <= 0:
+        raise ValueError("temperature must be positive")
     logits = np.log(np.clip(probs, 1e-8, 1.0)) / float(temperature)
     logits -= logits.max(axis=1, keepdims=True)
     exp = np.exp(logits)
@@ -18,13 +23,24 @@ def temperature_scale(probs, temperature):
 
 
 class AdaptiveNanoMaternalPFNClassifier:
-    def __init__(self, checkpoints, query_batch_size=8, cv_folds=4,
-                 weight_sharpness=6.0, calibrate=True, estimator_factory=None,
-                 device='cpu'):
-        if len(checkpoints) != 2:
-            raise ValueError("expected exactly v1 and v2 checkpoints")
+    """Compare 2-8 frozen experts by stratified context-only cross-validation.
+
+    weighting='softmax' yields smooth CV-log-loss weights; 'winner' selects one
+    expert; 'uniform' is a control. The same frozen task and split can evaluate
+    every rule. In small contexts, CV may not be possible; weights then revert
+    to uniform rather than using test labels.
+    """
+    def __init__(
+        self, checkpoints, query_batch_size=8, cv_folds=4,
+        weight_sharpness=6.0, calibrate=True, estimator_factory=None,
+        device="cpu", weighting="softmax",
+    ):
+        if not 2 <= len(checkpoints) <= 8:
+            raise ValueError("expected 2 to 8 pretrained expert checkpoints")
         if cv_folds < 2 or weight_sharpness <= 0:
             raise ValueError("cv_folds >=2 and weight_sharpness >0 required")
+        if weighting not in ("softmax", "winner", "uniform"):
+            raise ValueError("weighting must be softmax, winner, or uniform")
         self.checkpoints = tuple(Path(p) for p in checkpoints)
         self.query_batch_size = query_batch_size
         self.cv_folds = int(cv_folds)
@@ -32,6 +48,7 @@ class AdaptiveNanoMaternalPFNClassifier:
         self.calibrate = bool(calibrate)
         self.estimator_factory = estimator_factory
         self.device = device
+        self.weighting = weighting
         self.experts_ = None
 
     def fit(self, X, y):
@@ -43,24 +60,26 @@ class AdaptiveNanoMaternalPFNClassifier:
         n_classes = len(self.classes_)
         if n_classes not in (2, 3):
             raise ValueError("expected 2 or 3 context classes")
+        n_experts = len(self.checkpoints)
         if self.experts_ is None:
             factory = self.estimator_factory or (
                 lambda p: NanoMaternalPFNClassifier(
-                    p, device=self.device, query_batch_size=self.query_batch_size
+                    p, device=self.device,
+                    query_batch_size=self.query_batch_size,
                 )
             )
             self.experts_ = [factory(p) for p in self.checkpoints]
-        self.weights_ = np.array([0.5, 0.5], dtype=np.float64)
+        self.weights_ = np.full(n_experts, 1.0 / n_experts, dtype=np.float64)
         self.temperature_ = 1.0
-        self.context_cv_nll_ = [None, None]
+        self.context_cv_nll_ = [None] * n_experts
         self.context_cv_folds_ = 0
         self.cv_status_ = "insufficient_minority_labels"
         folds = min(self.cv_folds, int(np.bincount(encoded_y).min()))
         if folds >= 2:
             splitter = StratifiedKFold(
-                n_splits=folds, shuffle=True, random_state=20261111
+                n_splits=folds, shuffle=True, random_state=20261111,
             )
-            oof = np.full((2, len(y), n_classes), np.nan, dtype=np.float64)
+            oof = np.full((n_experts, len(y), n_classes), np.nan, dtype=np.float64)
             for train, valid in splitter.split(X, encoded_y):
                 if len(np.unique(y[train])) != n_classes:
                     continue
@@ -68,13 +87,20 @@ class AdaptiveNanoMaternalPFNClassifier:
                     expert.fit(X[train], y[train])
                     if not np.array_equal(expert.classes_, self.classes_):
                         raise RuntimeError("class mapping changed inside context CV")
-                    oof[j, valid] = expert.predict_proba(X[valid])
-            if np.isfinite(oof).all():
+                    prediction = np.asarray(expert.predict_proba(X[valid]))
+                    if prediction.shape != (len(valid), n_classes):
+                        raise RuntimeError("expert returned wrong probability shape")
+                    oof[j, valid] = prediction
+            if np.isfinite(oof).all() and np.all(oof >= 0):
                 clipped = np.clip(oof, 1e-7, 1.0)
+                clipped /= clipped.sum(axis=2, keepdims=True)
                 nll = -np.log(clipped[:, np.arange(len(y)), encoded_y]).mean(axis=1)
-                logits = -self.weight_sharpness * (nll - nll.min())
-                w = np.exp(logits - logits.max())
-                self.weights_ = w / w.sum()
+                if self.weighting == "softmax":
+                    logits = -self.weight_sharpness * (nll - nll.min())
+                    weights = np.exp(logits - logits.max())
+                    self.weights_ = weights / weights.sum()
+                elif self.weighting == "winner":
+                    self.weights_ = np.eye(n_experts)[np.argmin(nll)]
                 self.context_cv_nll_ = [float(v) for v in nll]
                 self.context_cv_folds_ = folds
                 self.cv_status_ = "cross_fitted"
@@ -83,8 +109,10 @@ class AdaptiveNanoMaternalPFNClassifier:
                     def objective(log_t):
                         calibrated = temperature_scale(oof_mix, np.exp(log_t))
                         chosen = calibrated[np.arange(len(y)), encoded_y]
-                        return float(-np.log(np.clip(chosen, 1e-7, 1.0)).mean()
-                                     + 0.025 * log_t ** 2)
+                        return float(
+                            -np.log(np.clip(chosen, 1e-7, 1.0)).mean()
+                            + 0.025 * log_t ** 2
+                        )
                     opt = minimize_scalar(
                         objective, bounds=(np.log(.5), np.log(3.)),
                         method="bounded",
@@ -93,20 +121,28 @@ class AdaptiveNanoMaternalPFNClassifier:
                         self.temperature_ = float(np.exp(opt.x))
             else:
                 self.cv_status_ = "invalid_cross_fit"
-        # Experts condition on all and only labeled context rows for prediction.
+        # Restore every expert to the complete labeled context, never query data.
         for expert in self.experts_:
             expert.fit(X, y)
         self.diagnostics_ = {
             "context_only": True,
             "cv_status": self.cv_status_,
             "cv_folds": self.context_cv_folds_,
-            "v1_weight": float(self.weights_[0]),
-            "v2_weight": float(self.weights_[1]),
-            "v1_cv_nll": self.context_cv_nll_[0],
-            "v2_cv_nll": self.context_cv_nll_[1],
+            "weighting": self.weighting,
+            "expert_paths": [str(p) for p in self.checkpoints],
+            "expert_weights": [float(v) for v in self.weights_],
+            "expert_cv_nll": self.context_cv_nll_,
             "temperature": self.temperature_,
             "n_context": len(y),
         }
+        if n_experts == 2:
+            # Keep the original paper's two-expert diagnostics compatible.
+            self.diagnostics_.update({
+                "v1_weight": float(self.weights_[0]),
+                "v2_weight": float(self.weights_[1]),
+                "v1_cv_nll": self.context_cv_nll_[0],
+                "v2_cv_nll": self.context_cv_nll_[1],
+            })
         return self
 
     def predict_proba(self, X):
