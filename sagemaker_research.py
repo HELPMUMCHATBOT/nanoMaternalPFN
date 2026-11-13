@@ -196,7 +196,19 @@ def main():
     log_json(output_dir/"phase_status.json",phase)
 
     from nanomaternalpfn.distillation import distill
-    best_config = next(e for e in measured if e["id"] == ranking[0]["id"])
+    by_id = {e["id"]:e for e in measured}
+    distinct_teachers = []
+    seen_trajectories = set()
+    for item in ranking:
+        trajectory = by_id[item["id"]]["training_trajectory_id"]
+        if trajectory not in seen_trajectories:
+            distinct_teachers.append(item["checkpoint"])
+            seen_trajectories.add(trajectory)
+        if len(distinct_teachers) == 2:
+            break
+    if len(distinct_teachers) != 2:
+        raise RuntimeError("fewer than two independent pretrained trajectories for distillation")
+    best_config = by_id[ranking[0]["id"]]
     train_replay = research/"priors"/(
         f"p{round(best_config['maternal_fraction']*100):03d}_"
         f"{best_config['variant']}_train.h5"
@@ -218,7 +230,7 @@ def main():
     student_path = student_dir/"distilled_tiny.pt"
     if not (student_dir/"distilled_tiny.best.inference.pt").is_file():
         report = distill(
-            distill_train,[ranking[0]["checkpoint"],ranking[1]["checkpoint"]],
+            distill_train,distinct_teachers,
             student_path,steps=a.distill_steps,
             batch_size=a.batch_size,microbatch_size=a.microbatch_size,
             max_context=a.max_context,
