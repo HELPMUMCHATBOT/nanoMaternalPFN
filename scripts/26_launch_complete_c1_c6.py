@@ -61,7 +61,8 @@ def main():
     p.add_argument("--v2-dir",type=Path,default=Path("artifacts/results/aws_v2_pretrain"))
     p.add_argument("--instance-type",default="ml.g5.2xlarge")
     p.add_argument("--volume-gb",type=int,default=150)
-    p.add_argument("--max-run-seconds",type=int,default=1209600)
+    p.add_argument("--max-run-seconds",type=int,default=432000,
+                   help="Training-job limit in this AWS account is 432000 seconds (five days)")
     p.add_argument("--step-budgets",default="2500,5000,10000,25000")
     p.add_argument("--num-tables",type=int,default=200000)
     p.add_argument("--validation-tables",type=int,default=512)
@@ -69,8 +70,8 @@ def main():
     p.add_argument("--batch-size",type=int,default=32)
     p.add_argument("--microbatch-size",type=int,default=8)
     a=p.parse_args()
-    if a.volume_gb<100 or not 3600<=a.max_run_seconds<=2419200:
-        p.error("invalid disk size or SageMaker runtime limit")
+    if a.volume_gb<100 or not 3600<=a.max_run_seconds<=432000:
+        p.error("volume must be >=100 GiB and max-run-seconds between 3600 and the account quota of 432000")
     if a.batch_size<1 or a.microbatch_size<1 or a.batch_size%a.microbatch_size:
         p.error("invalid effective/microbatch size")
     if not a.prefix.startswith("nanomaternalpfn/c1-c6-"):
