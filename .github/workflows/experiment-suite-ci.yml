@@ -1,0 +1,23 @@
+name: E1-E12 experiment contract tests
+on:
+  push:
+    paths:
+      - 'scripts/experiments/**'
+      - 'tests/test_e1_e12_experiments.py'
+      - '.github/workflows/experiment-suite-ci.yml'
+  pull_request:
+    paths:
+      - 'scripts/experiments/**'
+      - 'tests/test_e1_e12_experiments.py'
+      - '.github/workflows/experiment-suite-ci.yml'
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -e '.[test]' psutil
+      - run: python -m pytest -q tests/test_e1_e12_experiments.py
+      - run: python -m scripts.experiments.training_matrix --output artifacts/results/e1_e12/training > /dev/null
