@@ -65,8 +65,16 @@ def run(args):
     if not args.execute:
         return dict(planned=len(specs), completed=0, plan=str(root / "research_plan.json"),
                     statement="DRY RUN. No optimizer steps were executed.")
-    results = []
+    result_path = root / "measured_results.json"
+    results = json.loads(result_path.read_text()) if args.resume and result_path.exists() else []
+    completed = {row["id"] for row in results}
+    if len(completed) != len(results):
+        raise ValueError("duplicate IDs in completed results")
+    if not completed.issubset({spec["id"] for spec in specs}):
+        raise ValueError("cannot resume a different experiment matrix")
     for spec in specs:
+        if spec["id"] in completed:
+            continue
         prefix = f"p{round(spec['maternal_fraction'] * 100):03d}_{spec['variant']}"
         archive = root / "priors" / f"{prefix}_train.h5"
         validation = root / "priors" / f"{prefix}_validation.h5"
@@ -87,7 +95,7 @@ def run(args):
         if file_sha256(archive) == file_sha256(validation):
             raise RuntimeError("training replay equals validation replay")
         output = root / "checkpoints" / (spec["id"] + ".pt")
-        if output.exists():
+        if output.exists() and not args.resume:
             raise FileExistsError(
                 f"{output} already exists; use another output root to avoid overwriting results"
             )
@@ -103,7 +111,7 @@ def run(args):
             save_every=args.validate_every, validate_every=args.validate_every,
             validation_path=validation, validation_batches_per_context=1 if args.smoke else 2,
             validation_batch_size=2 if args.smoke else 8,
-            seed=args.train_seed,
+            seed=args.train_seed, resume=args.resume and output.exists(),
         )
         entry = {
             **spec, "elapsed_seconds_measured":time.perf_counter() - started,
@@ -119,7 +127,7 @@ def run(args):
             "synthetic_only":True,
         }
         results.append(entry)
-        (root / "measured_results.json").write_text(json.dumps(results,indent=2) + "\n")
+        result_path.write_text(json.dumps(results,indent=2) + "\n")
         print(json.dumps(entry,sort_keys=True),flush=True)
     return dict(planned=len(specs), completed=len(results),
                 results=str(root / "measured_results.json"))
@@ -144,6 +152,7 @@ def main():
     p.add_argument("--validate-every",type=int,default=250)
     p.add_argument("--device",choices=("cpu","cuda"),default="cuda")
     p.add_argument("--execute",action="store_true")
+    p.add_argument("--resume",action="store_true")
     p.add_argument("--smoke",action="store_true",help="Use small contexts; never clinical evidence")
     args = p.parse_args()
     if args.smoke and not args.execute:
