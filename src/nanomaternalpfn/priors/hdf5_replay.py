@@ -37,7 +37,7 @@ def create_replay(
         raise ValueError("maternal_probability must be between zero and one")
     if prior not in ("maternal","generic","mixture"):
         raise ValueError("Invalid prior")
-    if variant not in ('v1','v2'):
+    if variant not in ('v1','v2','v3_robust'):
         raise ValueError('Invalid synthetic prior variant')
     path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)
     settings={
@@ -47,10 +47,12 @@ def create_replay(
         "maternal_probability":float(maternal_probability),
         "source":"synthetic","schema_version":2,
     }
-    if variant == 'v2':
-        settings.update({'schema_version':3,'variant':'v2',
+    if variant in ('v2','v3_robust'):
+        settings.update({'schema_version':4 if variant=='v3_robust' else 3,'variant':variant,
                          'class_permutation_augmented':True,
                          'sign_flip_task_probability':0.5})
+        if variant == 'v3_robust':
+            settings['robust_domain_shift_and_label_noise'] = True
     new=not path.exists()
     with h5py.File(path,"a") as f:
         if new:
@@ -61,7 +63,7 @@ def create_replay(
             for k in ("n_rows","n_features","n_classes"):
                 f.create_dataset(k,(num_tables,),dtype="i4")
             f.create_dataset("is_maternal",(num_tables,),dtype="i1")
-            if variant == 'v2':
+            if variant in ('v2','v3_robust'):
                 f.create_dataset('sign_flip_task_selected',(num_tables,),dtype='i1')
         elif json.loads(f.attrs["settings"])!=settings:
             raise ValueError("Existing replay settings do not match; refusing unsafe resume")
@@ -74,15 +76,16 @@ def create_replay(
             classes=int(rng.choice([2,3]))
             x,y,meta=sample_task(rows,features,classes,prior,rng=rng,
                                   maternal_probability=maternal_probability,
-                                  augment_class_permutation=(variant=='v2'),
-                                  augment_feature_sign_flip=(variant=='v2'))
+                                  augment_class_permutation=(variant!='v1'),
+                                  augment_feature_sign_flip=(variant!='v1'),
+                                  robust=(variant=='v3_robust'))
             f["X"][i]=x.ravel()
             f["y"][i]=y.ravel()
             f["n_rows"][i]=rows
             f["n_features"][i]=features
             f["n_classes"][i]=classes
             f["is_maternal"][i]=int(meta["family"]!="generic")
-            if variant == 'v2':
+            if variant in ('v2','v3_robust'):
                 f['sign_flip_task_selected'][i]=int(meta['sign_flip_task_selected'])
             if (i+1)%flush_every==0:
                 f.attrs["completed"]=i+1
@@ -165,7 +168,8 @@ def main():
     p.add_argument("--num-tables",type=int,default=200000)
     p.add_argument("--seed",type=int,default=20261107)
     p.add_argument("--prior",choices=["maternal","generic","mixture"],default="mixture")
-    p.add_argument('--variant',choices=('v1','v2'),default='v1')
+    p.add_argument('--variant',choices=('v1','v2','v3_robust'),default='v1')
+    p.add_argument('--maternal-probability',type=float,default=0.7)
     p.add_argument("--min-rows",type=int,default=32)
     p.add_argument("--max-rows",type=int,default=576)
     p.add_argument("--min-features",type=int,default=5)
@@ -176,7 +180,8 @@ def main():
     print(json.dumps(create_replay(a.path,num_tables=a.num_tables,seed=a.seed,
           prior=a.prior,min_rows=a.min_rows,max_rows=a.max_rows,
           min_features=a.min_features,max_features=a.max_features,
-          limit=a.limit,variant=a.variant),indent=2))
+          limit=a.limit,variant=a.variant,
+          maternal_probability=a.maternal_probability),indent=2))
 
 
 if __name__=="__main__":
