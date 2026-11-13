@@ -415,7 +415,7 @@ def main():
     edge = json.loads(edge_path.read_text())
     memory_measurements = json.loads(memory_path.read_text())
     (result/"measured_memory_original.json").write_text(
-        json.dumps(memory_measurements,indent=2)+"\\n")
+        json.dumps(memory_measurements,indent=2)+"\n")
     adaptive_path = root / "adaptive_cpu_profile.json"
     adaptive = (json.loads(adaptive_path.read_text())
                 if adaptive_path.is_file() else None)
@@ -481,12 +481,12 @@ def main():
                                  adaptive_cpu=adaptive)
     if args.include_three_expert:
         manuscript += (
-            "\\n## Supplement: exploratory three-expert Tiny result\\n\\n"
+            "\n## Supplement: exploratory three-expert Tiny result\n\n"
             "This selector was added after multiple inspections of the same test "
             "benchmarks and cannot be described as independent confirmation. "
             "Weights use context-only CV; measured clinical scores are from "
-            "the separate, completed frozen-context evaluation.\\n\\n"
-            + markdown(extended_macro) + "\\n"
+            "the separate, completed frozen-context evaluation.\n\n"
+            + markdown(extended_macro) + "\n"
         )
     (result/"manuscript_draft.md").write_text(manuscript)
     print(json.dumps({
