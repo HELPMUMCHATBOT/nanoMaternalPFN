@@ -52,6 +52,7 @@ def stage_source(target):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--job-name",default=None,help="Optional fixed job name for automatic continuation")
     p.add_argument("--region",default="us-east-1")
     p.add_argument("--bucket",default="sagemaker-us-east-1-355119164071")
     p.add_argument("--role-arn",default="arn:aws:iam::355119164071:role/SageMakerExecutionRole")
@@ -146,7 +147,10 @@ def main():
                 "distill-steps":a.distill_steps,
             },
         )
-        name="nanomaternalpfn-allc1c6-"+datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        name=a.job_name or ("nanomaternalpfn-allc1c6-"+
+                         datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S"))
+        if len(name)>63 or not name.startswith("nanomaternalpfn-allc1c6-"):
+            raise ValueError("invalid research job name")
         print("Submitting full GPU study:",name,flush=True)
         job.fit(inputs={"research_input":input_uri},wait=False,logs=False,job_name=name)
         print(json.dumps({
