@@ -90,6 +90,8 @@ def train_replay(
             raise ValueError("Cannot resume on a different model variant")
         old_config=dict(checkpoint["config"])
         old_config.setdefault("architecture","post_ln_v1")
+        old_config.setdefault("feature_encoder_type","linear")
+        old_config.setdefault("normalization","standard")
         if checkpoint["replay_sha256"]!=replay_hash or old_config!=asdict(cfg):
             raise ValueError("Cannot resume on different prior archive/model architecture")
         for field,value in (("seed",seed),("batch_size",batch_size),("lr",peak_lr),
