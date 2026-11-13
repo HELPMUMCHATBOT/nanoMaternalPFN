@@ -37,7 +37,7 @@ METHODS = (
     "nanotabpfn_generic", "nanotabpfn_mixture",
     "tabpfn_v2_single", "tabpfn_v2_default",
     "tiny_generic", "tiny_mixture", "base_generic", "base_mixture",
-    *V1_ARMS, "adaptive_tiny", "adaptive_base",
+    *V1_ARMS, "adaptive_tiny", "adaptive_base", "distilled_tiny",
 )
 RESEARCH_ADAPTIVE = tuple(f"adaptive_{tier}_{kind}" for tier in ("tiny", "base") for kind in ("three", "four"))
 RAW_FIELDS = (
@@ -80,6 +80,11 @@ def load_manifest(path):
 
 def make_estimator(method, root, device, seed, query_batch_size):
     ckpts = root / "checkpoints"
+    if method == "distilled_tiny":
+        return NanoMaternalPFNClassifier(
+            ckpts / "c4" / "distilled_tiny.best.inference.pt",
+            device=device, query_batch_size=query_batch_size,
+        )
     if method in ("nanotabpfn_generic","nanotabpfn_mixture"):
         return NanoTabPFNReferenceClassifier(
             ckpts / f"{method}.best.inference.pt",
