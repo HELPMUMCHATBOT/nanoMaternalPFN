@@ -64,3 +64,29 @@ def test_full_entry_contains_all_stages_not_only_synthetic_train():
         assert stage in txt
     assert "all_stages_complete" in txt
     assert "18_run_complete_benchmark.py" in txt
+
+
+def test_shared_trajectory_records_two_genuine_budget_snapshots(tmp_path):
+    import subprocess
+    import sys
+    output=tmp_path/"shared_measured"
+    cmd=[
+        sys.executable,str(ROOT/"scripts"/"23_run_c1_c6_research.py"),
+        "--execute","--smoke","--device","cpu","--output",str(output),
+        "--variants","v3_robust","--maternal-fractions",".7",
+        "--step-budgets","1","2","--encoders","gated",
+        "--normalizations","robust","--num-tables","20",
+        "--validation-tables","20","--batch-size","2",
+        "--microbatch-size","1","--validate-every","1",
+    ]
+    subprocess.run(cmd,cwd=ROOT,check=True,capture_output=True,text=True)
+    plan=json.loads((output/"research_plan.json").read_text())
+    results=json.loads((output/"measured_results.json").read_text())
+    assert plan["training_trajectories"]==1
+    assert plan["total_optimizer_updates"]==2
+    assert sorted(x["completed_optimizer_steps"] for x in results)==[1,2]
+    assert {x["training_trajectory_id"] for x in results}=={results[0]["training_trajectory_id"]}
+    for item in results:
+        assert Path(item["inference_checkpoint"]).is_file()
+        assert item["heldout_synthetic_loss"] is not None
+        assert item["clinical_auroc_measured"] is False
