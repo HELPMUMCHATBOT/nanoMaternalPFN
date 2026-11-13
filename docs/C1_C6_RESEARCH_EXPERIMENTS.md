@@ -260,3 +260,64 @@ or their checksums disagree. These source paths can be overridden using
 The job does **not** reconstruct any missing public cohort files or guess
 their recorded outcomes, labels, or frozen split definitions. It does not
 require uploading any AWS secret to GitHub or ChatGPT.
+
+
+## Account quota correction — 13 November 2026
+
+A live SageMaker `CreateTrainingJob` submission was rejected because the
+account's **Longest run time for a training job** quota is **432,000 seconds**,
+not the 1,209,600 seconds previously requested. The original job did **not**
+start training; this is independent of instance choice or L4 capacity.
+The one-job launcher now defaults to 432,000 seconds and rejects longer values.
+
+### Full run with automatic continuation (no dry run, no tiny pilot)
+
+On the authenticated Mac, run:
+
+```bash
+cd ~/nanoMaternalPFN
+git fetch origin
+git switch research/c1-c6-improvements
+git pull --ff-only
+source .venv/bin/activate
+export AWS_PROFILE=helpmum-training
+python -m pip install "sagemaker>=2.230,<3" boto3
+python scripts/28_run_complete_c1_c6_autoresume.py \
+  --region us-east-1 \
+  --instance-type ml.g6.2xlarge \
+  --max-run-seconds 432000
+```
+
+This command **really submits and monitors** SageMaker training jobs. It
+uses the existing frozen eight-task inputs and all 40 training trajectories,
+160 budgeted checkpoints, student distillation and complete benchmark. AWS
+restores the training files from the same `checkpoint_s3_uri` whenever
+a new training job starts. This controller tracks submitted job names,
+configuration, branch commit and state in
+`artifacts/results/c1_c6_auto_resume_state.json`.
+It automatically launches another billable job **only** when the prior
+job has terminal status `Stopped` and secondary status
+`MaxRuntimeExceeded`. It does not retry other errors and caps total
+submissions at eight jobs by default.
+
+**Operational requirement:** the Mac or remote machine running this
+controller must remain on, connected to AWS, and able to poll. If it
+disconnects, rerun the same controller command from the same repository
+revision and state file; it discovers the last job by its saved name
+without duplicating an active job. Jobs that are already running continue
+on AWS even if the local controller stops. The controller does not create
+a cloud-native always-on orchestration service.
+
+### Single-job option
+
+```bash
+python scripts/26_launch_complete_c1_c6.py \
+  --instance-type ml.g6.2xlarge --max-run-seconds 432000
+```
+
+This submits one actual job but does **not** automatically launch another
+if the five-day limit is reached. Because the whole workload is substantial,
+prefer the automatic continuation controller above.
+
+Neither command asserts successful training or clinical AUROC before
+the AWS job actually reaches `Completed` and produces measured files.
