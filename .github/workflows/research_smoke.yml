@@ -34,7 +34,7 @@ jobs:
           r=json.loads(Path('artifacts/results/c1_c6_ci_smoke/measured_results.json').read_text())
           assert len(r)==1 and r[0]['completed_optimizer_steps']==1
           assert r[0]['clinical_auroc_measured'] is False
-          assert r[0]['elapsed_seconds_measured']>0
+          assert r[0]['trajectory_total_elapsed_seconds_measured']>0
           assert r[0]['heldout_synthetic_best_loss'] is not None
           print(json.dumps(r[0], indent=2))
           PY
