@@ -228,18 +228,22 @@ def main():
     student_dir = input_dir/"checkpoints"/"c4"
     student_dir.mkdir(parents=True,exist_ok=True)
     student_path = student_dir/"distilled_tiny.pt"
-    if not (student_dir/"distilled_tiny.best.inference.pt").is_file():
-        report = distill(
-            distill_train,distinct_teachers,
-            student_path,steps=a.distill_steps,
-            batch_size=a.batch_size,microbatch_size=a.microbatch_size,
-            max_context=a.max_context,
-            validation_path=distill_val,
-            validate_every=a.validate_every,device="cuda",
-        )
-        log_json(output_dir/"distillation_measured.json",report)
-    if not (student_dir/"distilled_tiny.best.inference.pt").is_file():
-        raise RuntimeError("distillation did not generate best Tiny student")
+    # A partial best checkpoint is not a completed 25k-step distillation.
+    # Resuming requires the saved optimizer, RNG state and completion report.
+    report = distill(
+        distill_train,distinct_teachers,
+        student_path,steps=a.distill_steps,
+        batch_size=a.batch_size,microbatch_size=a.microbatch_size,
+        max_context=a.max_context,
+        validation_path=distill_val,
+        validate_every=a.validate_every,device="cuda",
+        resume=True, checkpoint_every=25,
+    )
+    log_json(output_dir/"distillation_measured.json",report)
+    if report["steps_completed"] != a.distill_steps or not (
+        student_dir/"distilled_tiny.best.inference.pt"
+    ).is_file():
+        raise RuntimeError("distillation incomplete despite available partial weights")
     phase["distillation"] = True
     log_json(output_dir/"phase_status.json",phase)
 
