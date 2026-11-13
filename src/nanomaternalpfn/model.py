@@ -12,14 +12,26 @@ class ModelConfig:
     mlp_hidden: int = 192
     max_classes: int = 3
     architecture: str = 'post_ln_v1'
+    feature_encoder_type: str = 'linear'
+    normalization: str = 'standard'
 
 class MissingnessFeatureEncoder(nn.Module):
-    def __init__(self, d_model):
+    def __init__(self, d_model, encoder_type='linear', normalization='standard'):
         super().__init__()
+        if encoder_type not in ('linear', 'gated'):
+            raise ValueError('encoder_type must be linear or gated')
+        if normalization not in ('standard', 'robust'):
+            raise ValueError('normalization must be standard or robust')
+        self.encoder_type = encoder_type
+        self.normalization = normalization
         self.proj = nn.Linear(2, d_model)
+        if encoder_type == 'gated':
+            # Shared across features: permutation-equivariant representation.
+            self.gate = nn.Sequential(nn.Linear(2, d_model),
+                                      nn.GELU(), nn.Linear(d_model, d_model))
 
     @staticmethod
-    def encode_inputs(x, n_train):
+    def encode_inputs(x, n_train, normalization='standard'):
         if x.ndim != 3 or n_train < 1 or n_train > x.shape[1]:
             raise ValueError('x must be (batch, rows, features) with >=1 context row')
         if not torch.isfinite(torch.nan_to_num(x, nan=0.0)).all():
@@ -28,16 +40,31 @@ class MissingnessFeatureEncoder(nn.Module):
         observed = ~torch.isnan(context)
         counts = observed.sum(dim=1, keepdim=True).clamp(min=1)
         clean = torch.nan_to_num(context, nan=0.0)
-        mean = clean.sum(dim=1, keepdim=True) / counts
-        var = torch.where(observed, context - mean, torch.zeros_like(context)).square().sum(dim=1, keepdim=True) / counts
-        std = torch.sqrt(var + 1e-6)
+        if normalization == 'robust':
+            # Context-only median/MAD. No query observations enter statistics.
+            valid = torch.where(observed, context, torch.full_like(context, float('nan')))
+            mean = torch.nanmedian(valid, dim=1, keepdim=True).values
+            mean = torch.nan_to_num(mean, nan=0.0)
+            dev = torch.where(observed, (context-mean).abs(), torch.full_like(context, float('nan')))
+            std = 1.4826 * torch.nanmedian(dev, dim=1, keepdim=True).values
+            std = torch.nan_to_num(std, nan=1.0).clamp_min(1e-3)
+        elif normalization == 'standard':
+            mean = clean.sum(dim=1, keepdim=True) / counts
+            var = torch.where(observed, context - mean, torch.zeros_like(context)).square().sum(dim=1, keepdim=True) / counts
+            std = torch.sqrt(var + 1e-6)
+        else:
+            raise ValueError('unknown normalization')
         missing = torch.isnan(x)
         normalized = torch.where(missing, torch.zeros_like(x), (torch.nan_to_num(x, nan=0.0) - mean) / std)
         normalized = normalized.clamp(-10.0, 10.0)
         return torch.stack([normalized, missing.to(normalized.dtype)], dim=-1)
 
     def forward(self, x, n_train):
-        return self.proj(self.encode_inputs(x, n_train))
+        encoded = self.encode_inputs(x, n_train, self.normalization)
+        tokens = self.proj(encoded)
+        if self.encoder_type == 'gated':
+            tokens = tokens * (1 + torch.tanh(self.gate(encoded)))
+        return tokens
 
 class TargetEncoder(nn.Module):
     def __init__(self, d_model, max_classes):
@@ -96,7 +123,9 @@ class NanoMaternalPFN(nn.Module):
             raise ValueError('d_model must be divisible by n_heads')
         if self.cfg.architecture not in ('post_ln_v1', 'pre_ln_v2'):
             raise ValueError('Unknown model architecture version')
-        self.feature_encoder = MissingnessFeatureEncoder(self.cfg.d_model)
+        self.feature_encoder = MissingnessFeatureEncoder(
+            self.cfg.d_model, self.cfg.feature_encoder_type, self.cfg.normalization
+        )
         self.target_encoder = TargetEncoder(self.cfg.d_model, self.cfg.max_classes)
         self.layers = nn.ModuleList([BiAttentionBlock(self.cfg) for _ in range(self.cfg.n_layers)])
         # Zero added trainable parameters; old checkpoint keys remain compatible.
