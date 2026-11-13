@@ -1,5 +1,21 @@
 # nanoMaternalPFN
 
+> **Research paper integration branch (13 November 2026):** The complete G1-G20
+> evidence-audit, optional three-expert Tiny evaluation, measured adaptive CPU
+> profile, provenance-verified review ZIP, and data-driven manuscript generator
+> are documented in [Gemini G1-G20 execution](docs/GEMINI_G1_G20_EXECUTION.md).
+> **No numerical clinical or hardware result is claimed unless its local
+> experiment files exist and pass validation.** Existing README sections below
+> describe earlier implementation milestones and may not reflect later work.
+> Frozen real datasets and trained checkpoint files are not distributed here.
+>
+> To execute the full local workflow, after checking out this branch and
+> installing `.[paper,test]`, run:
+> `python scripts/26_execute_gemini.py`
+> This runs real inference on existing frozen evaluation inputs and can take
+> substantial time; it does not train new models on AWS.
+
+
 **A lightweight tabular foundation-model research framework for low-data maternal health prediction.**
 
 nanoMaternalPFN studies whether a compact **Prior-Data Fitted Network (PFN)**, pretrained on a controllable **maternal-informed synthetic prior**, can transfer across small maternal/obstetric classification tasks while preserving predictive discrimination and probability calibration under resource constraints.
