@@ -241,3 +241,7 @@ A cautious, unverified first-run planning allocation is 6–18 hours, with up to
 There is **no published nanoMaternalPFN paper or DOI** to cite yet; please link to this repository when referring to this implementation. An explicit project software license and dataset-specific redistribution permissions must be resolved before an official release. External model weights and datasets retain their own terms.
 
 **Clinical scope:** research-only. No trained checkpoint in this repository is authorized or validated for care decisions.
+
+## Measured paper evidence and manuscript (P1-P15)
+
+The frozen eight-task, seven-source **exploratory** benchmark has been audited and reported without new training or invented patient-level outcomes. See [the complete measured manuscript](docs/paper/MANUSCRIPT.md), [statistical audit](docs/paper/STATISTICAL_REPORT.md), [source and reproducibility instructions](docs/paper/REPRODUCE.md), [clinical reporting audit](docs/paper/CLINICAL_REPORTING_AUDIT.md), and [P1-P15 implementation register](docs/paper/P1_P15_IMPLEMENTATION.md). Numbers are specific to the frozen ZIP and the official **TabPFN v2** comparison. Three-expert Tiny has the top *observed* macro AUROC, but the seven-source uncertainty interval crosses zero; neither clinical superiority nor independent confirmation is claimed. Do not confuse standalone ONNX latency/size with adaptive multi-expert performance.
