@@ -14,6 +14,7 @@ from .baselines import get_baseline
 from .calibration import multiclass_brier, ece
 from ..classifier import NanoMaternalPFNClassifier
 from ..adaptive_classifier import AdaptiveNanoMaternalPFNClassifier
+from ..multi_expert_classifier import ContextOnlyMultiExpertPFN
 
 
 FIELDS = ("method", "context", "seed", "accuracy", "brier", "ece15", "auroc")
@@ -78,15 +79,19 @@ def evaluate(
             if method == "pfn" and not checkpoint:
                 raise ValueError("pretrained checkpoint required for PFN comparison")
             if method == "adaptive" and not adaptive_checkpoints:
-                raise ValueError("adaptive method needs two checkpoints")
+                raise ValueError("adaptive method needs at least two checkpoints")
             pfn = (NanoMaternalPFNClassifier(
                 checkpoint, query_batch_size=query_batch_size,
                 **(pfn_kwargs or {})
             ) if method == "pfn" else None)
-            adaptive = (AdaptiveNanoMaternalPFNClassifier(
-                adaptive_checkpoints, query_batch_size=query_batch_size,
-                **(adaptive_kwargs or {})
-            ) if method == "adaptive" else None)
+            adaptive = (
+                (ContextOnlyMultiExpertPFN if len(adaptive_checkpoints) > 2
+                 else AdaptiveNanoMaternalPFNClassifier)(
+                    adaptive_checkpoints, query_batch_size=query_batch_size,
+                    **(adaptive_kwargs or {})
+                )
+                if method == "adaptive" else None
+            )
             for budget, all_draws in sorted(
                 manifest["context_draws"].items(), key=lambda kv: int(kv[0])
             ):

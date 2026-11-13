@@ -20,7 +20,7 @@ DEFAULT_DATASETS = (
 ARMS = ("tiny_generic", "tiny_mixture", "base_generic", "base_mixture")
 ORIGINAL = ("logistic", "random_forest") + ARMS
 PAPER = ("xgboost", "lightgbm", "tabpfn_v2_single", "tabpfn_v2_default",
-         "adaptive_tiny", "adaptive_base")
+         "adaptive_tiny", "adaptive_base", "adaptive_tiny_3expert")
 SUMMARY_FIELDS = ("dataset", "method", "context", "metric",
                   "n_valid_draws", "mean", "sd_between_context_draws")
 
@@ -75,6 +75,13 @@ def main():
             args.checkpoint_dir / f"{tier}_mixture.best.inference.pt",
         ) for tier in ("tiny", "base")
     }
+    # Opt-in exploratory selector: two maternal checkpoints plus generic v2.
+    # Previously frozen benchmark outputs remain unchanged.
+    adaptive["adaptive_tiny_3expert"] = (
+        args.v1_checkpoint_dir / "tiny_mixture.best.inference.pt",
+        args.checkpoint_dir / "tiny_mixture.best.inference.pt",
+        args.checkpoint_dir / "tiny_generic.best.inference.pt",
+    )
     for method in args.methods:
         for filename in (
             adaptive[method] if method in adaptive else
