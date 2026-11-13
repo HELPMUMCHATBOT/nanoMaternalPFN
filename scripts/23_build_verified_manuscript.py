@@ -392,15 +392,46 @@ def main():
         extended = pd.concat([primary,measured_three],ignore_index=True)
         if extended.duplicated(["dataset","method","context","metric"]).any():
             raise ValueError("Original results overlap 3-expert results")
-        # Additional exploratory results are placed in a separate table.
-        macro_table(extended).to_csv(result/"exploratory_extended_leaderboard.csv")
+        # Accept ONLY a complete, same-coverage comparator, not a partial run.
+        expected = primary.loc[
+            (primary.method=="adaptive_tiny") & (primary.metric=="auroc"),
+            ["dataset","context","n_valid_draws"]
+        ].set_index(["dataset","context"]).sort_index()
+        observed = measured_three.loc[
+            measured_three.metric=="auroc",
+            ["dataset","context","n_valid_draws"]
+        ].set_index(["dataset","context"]).sort_index()
+        if not expected.index.equals(observed.index):
+            raise ValueError("Three-expert run has incomplete context/dataset coverage")
+        if not expected["n_valid_draws"].equals(observed["n_valid_draws"]):
+            raise ValueError("Three-expert run has missing or extra valid context draws")
+        if set(measured_three.metric) != set(METRICS):
+            raise ValueError("Missing metric in three-expert evaluation")
+        if not np.isfinite(pd.to_numeric(measured_three["mean"])).all():
+            raise ValueError("Three-expert metric has nonfinite aggregate")
+        # Additional exploratory results live in separate outputs.
+        extended_macro = macro_table(extended)
+        extended_macro.to_csv(result/"exploratory_extended_leaderboard.csv")
     edge = json.loads(edge_path.read_text())
-    json.loads(memory_path.read_text())  # validate valid JSON without guessing fields
+    memory_measurements = json.loads(memory_path.read_text())
+    (result/"measured_memory_original.json").write_text(
+        json.dumps(memory_measurements,indent=2)+"\\n")
     adaptive_path = root / "adaptive_cpu_profile.json"
     adaptive = (json.loads(adaptive_path.read_text())
                 if adaptive_path.is_file() else None)
     raw, evidence_files = load_raw_draws(root)
     pairs = descriptive_pairs(raw, args.resamples)
+    # Original v1 and v2 raw scores are preserved as observational development
+    # history, not a clean single-factor causal architecture ablation.
+    if not raw.empty:
+        ablation = raw.loc[raw.method.isin([
+            "v1_tiny_generic","v1_tiny_mixture","v1_base_generic","v1_base_mixture",
+            "tiny_generic","tiny_mixture","base_generic","base_mixture",
+            "adaptive_tiny","adaptive_base",
+        ])]
+        if not ablation.empty:
+            (ablation.groupby(["method","context"],as_index=False)[list(METRICS)]
+             .mean().to_csv(result/"v1_v2_adaptive_development_table.csv",index=False))
     full.to_csv(result/"leaderboard_all.csv")
     low.to_csv(result/"leaderboard_low_data.csv")
     by_dataset.to_csv(result/"low_data_auroc_by_dataset.csv")
@@ -448,6 +479,15 @@ def main():
         provenance,indent=2,allow_nan=False)+"\n")
     manuscript = make_manuscript(full,low,by_dataset,ctu,edge,provenance,pairs,
                                  adaptive_cpu=adaptive)
+    if args.include_three_expert:
+        manuscript += (
+            "\\n## Supplement: exploratory three-expert Tiny result\\n\\n"
+            "This selector was added after multiple inspections of the same test "
+            "benchmarks and cannot be described as independent confirmation. "
+            "Weights use context-only CV; measured clinical scores are from "
+            "the separate, completed frozen-context evaluation.\\n\\n"
+            + markdown(extended_macro) + "\\n"
+        )
     (result/"manuscript_draft.md").write_text(manuscript)
     print(json.dumps({
         "source_summary_rows":len(primary),
