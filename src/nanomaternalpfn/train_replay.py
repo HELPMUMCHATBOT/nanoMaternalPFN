@@ -45,7 +45,7 @@ def train_replay(
     if warmup_steps < 0:
         raise ValueError("warmup_steps cannot be negative")
     peak_lr = float(lr) if lr is not None else (
-        (2e-4 if tier == 'base' else 5e-4) if variant == 'v2' else 5e-4
+        (2e-4 if tier == 'base' else 5e-4) if variant != 'v1' else 5e-4
     )
     if peak_lr <= 0:
         raise ValueError("learning rate must be positive")
