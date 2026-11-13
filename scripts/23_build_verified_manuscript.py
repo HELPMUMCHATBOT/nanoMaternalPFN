@@ -194,6 +194,12 @@ def make_manuscript(full, low, low_by_dataset, ctu, edge, provenance,
             })
     edge_table = markdown(pd.DataFrame(edge_rows)) if edge_rows else (
         "No validated ONNX timing entries in supplied EdgeBench profile.")
+    baseline_comparisons = edge.get("baseline_comparisons", [])
+    baseline_table = (
+        markdown(pd.DataFrame(baseline_comparisons))
+        if baseline_comparisons else
+        "No matched baseline CPU timing entries supplied."
+    )
     extra = ""
     if adaptive_cpu:
         if adaptive_cpu.get("results"):
@@ -308,8 +314,12 @@ model development; later comparisons are exploratory.
 ### 3.5 Inference efficiency: standalone ONNX model
 
 {edge_table}
+
+### 3.6 Measured baseline EdgeBench timings
+
+{baseline_table}
 {extra}
-### 3.6 Statistical comparisons
+### 3.7 Statistical comparisons
 
 {pair_text}
 
@@ -423,6 +433,7 @@ def main():
     pairs = descriptive_pairs(raw, args.resamples)
     # Original v1 and v2 raw scores are preserved as observational development
     # history, not a clean single-factor causal architecture ablation.
+    development_table = None
     if not raw.empty:
         ablation = raw.loc[raw.method.isin([
             "v1_tiny_generic","v1_tiny_mixture","v1_base_generic","v1_base_mixture",
@@ -430,8 +441,13 @@ def main():
             "adaptive_tiny","adaptive_base",
         ])]
         if not ablation.empty:
-            (ablation.groupby(["method","context"],as_index=False)[list(METRICS)]
-             .mean().to_csv(result/"v1_v2_adaptive_development_table.csv",index=False))
+            development_table = (
+                ablation.groupby(["method","context"],as_index=False)[list(METRICS)]
+                .mean()
+            )
+            development_table.to_csv(
+                result/"v1_v2_adaptive_development_table.csv",index=False
+            )
     full.to_csv(result/"leaderboard_all.csv")
     low.to_csv(result/"leaderboard_low_data.csv")
     by_dataset.to_csv(result/"low_data_auroc_by_dataset.csv")
@@ -479,6 +495,13 @@ def main():
         provenance,indent=2,allow_nan=False)+"\n")
     manuscript = make_manuscript(full,low,by_dataset,ctu,edge,provenance,pairs,
                                  adaptive_cpu=adaptive)
+    if development_table is not None:
+        manuscript += (
+            "\n## Supplement: v1, v2 and adaptive development results\n\n"
+            "Descriptive chronological model comparison, not a single-factor "
+            "causal ablation, because multiple changes differed across versions.\n\n"
+            + markdown(development_table) + "\n"
+        )
     if args.include_three_expert:
         manuscript += (
             "\n## Supplement: exploratory three-expert Tiny result\n\n"
