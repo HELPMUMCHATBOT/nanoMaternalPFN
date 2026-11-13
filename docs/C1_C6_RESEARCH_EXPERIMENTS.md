@@ -97,10 +97,9 @@ python scripts/23_run_c1_c6_research.py \
   --batch-size 32 --microbatch-size 8
 ```
 
-The full default factorial matrix contains 160 independently specified model configurations
+The full default factorial matrix evaluates 160 model-budget configurations from 40 shared training trajectories
 (2 variants × 5 mixtures × 4 budgets × 2 encoders × 2 normalizers).
-It is computationally substantial. Each run has an independent checkpoint,
-fresh optimizer trajectory, measured time and held-out synthetic losses.
+It is computationally substantial. Each 25,000-step trajectory saves actual intermediate checkpoints at budgets 2,500, 5,000, 10,000 and 25,000. Thus comparisons across budgets use the same optimizer trajectory, with measured synthetic held-out losses and checkpoint hashes.
 The script refuses to overwrite an existing checkpoint. A budget comparison
 does **not** imply a given improvement in clinical performance.
 
@@ -230,16 +229,16 @@ prefix. The CLI prints the submitted SageMaker job name.
 
 ### Run size and limits
 
-Full default: 160 independently trained Tiny models (2 prior versions ×
-5 mixture weights × 4 total step budgets × 2 feature encoders × 2 context
-normalizers), with 200,000 synthetic task records per prior-mixture
-replay. Followed by common held-out synthetic ranking, 25,000-step
+Full default: 40 independently trained Tiny trajectories (2 prior versions ×
+5 mixture weights × 2 feature encoders × 2 context normalizers), each
+providing four measured snapshots at 2,500, 5,000, 10,000 and 25,000
+optimizer steps, for 160 model-budget evaluations. Each replay contains
+200,000 synthetic tasks per prior-mixture configuration. Followed by common held-out synthetic ranking, 25,000-step
 student distillation, and frozen real-data multi-method evaluation.
-Each independent budget is trained from scratch: total training optimizer
-updates = 40 × (2,500 + 5,000 + 10,000 + 25,000) = **1,700,000**.
-At effective batch size 32, that is **54,400,000 synthetic-task
-presentations**, plus 800,000 for 25,000-step distillation. All are
-replays with replacement, **not** 55.2 million distinct tasks.
+Total base-study optimizer updates = 40 × 25,000 = **1,000,000**.
+At effective batch size 32, that is **32,000,000 synthetic-task
+presentations**, plus **800,000** for the 25,000-step Tiny distillation.
+All use replay with replacement, **not** 32.8 million distinct tasks.
 
 The launcher currently specifies 150 GB scratch volume and a 14-day
 SageMaker job time limit. This is a substantial **billable** commitment
