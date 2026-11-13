@@ -90,3 +90,37 @@ def test_shared_trajectory_records_two_genuine_budget_snapshots(tmp_path):
         assert Path(item["inference_checkpoint"]).is_file()
         assert item["heldout_synthetic_loss"] is not None
         assert item["clinical_auroc_measured"] is False
+
+
+def test_aws_runtime_cap_and_auto_resume_status():
+    import argparse
+    import pytest
+    controller=module("auto_resume_check",ROOT/"scripts"/"28_run_complete_c1_c6_autoresume.py")
+    detail={"TrainingJobStatus":"Stopped","SecondaryStatus":"MaxRuntimeExceeded"}
+    assert controller.must_continue(detail)
+    assert not controller.must_continue({"TrainingJobStatus":"Stopped","SecondaryStatus":"Stopped"})
+    assert not controller.must_continue({"TrainingJobStatus":"Failed","FailureReason":"OutOfMemory"})
+    assert not controller.must_continue({"TrainingJobStatus":"Completed","SecondaryStatus":"Completed"})
+    args=argparse.Namespace(
+        region="us-east-1",instance_type="ml.g6.2xlarge",
+        bucket="test-bucket",prefix="nanomaternalpfn/c1-c6-complete",
+        max_run_seconds=432001,max_jobs=8,poll_seconds=600,launcher_arg=[],
+    )
+    with pytest.raises(ValueError,match="432000"):
+        controller.build_spec(args)
+    args.max_run_seconds=432000
+    assert controller.build_spec(args)["max_run_seconds"]==432000
+
+
+def test_aws_limit_is_enforced_by_full_launcher():
+    text=(ROOT/"scripts"/"26_launch_complete_c1_c6.py").read_text()
+    assert 'default=432000' in text
+    assert 'a.max_run_seconds<=432000' in text
+    compile((ROOT/"scripts"/"28_run_complete_c1_c6_autoresume.py").read_text(),
+            "28_run_complete_c1_c6_autoresume.py","exec")
+
+
+def test_distill_resume_uses_optimizer_and_not_best_only():
+    text=(ROOT/"sagemaker_research.py").read_text()
+    assert "resume=True, checkpoint_every=25" in text
+    assert 'report["steps_completed"] != a.distill_steps' in text
