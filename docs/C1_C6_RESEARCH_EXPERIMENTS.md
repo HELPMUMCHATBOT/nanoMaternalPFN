@@ -186,3 +186,78 @@ GPU costs, quotas, role permissions, and instance capacity before `--submit`.
 **Do not interpret successful one-step CI smoke tests, synthetic held-out
 loss, or job submission as completed eight-task clinical AUROC evaluation.**
 Full model accuracy must be measured separately on frozen real-data tasks.
+
+
+## FULL ONE-COMMAND RUN — NO DRY RUN
+
+`scripts/26_launch_complete_c1_c6.py` submits **one real billable
+SageMaker training job immediately**, not a preview. It stages all eight
+frozen prediction tasks, checks their hashes, includes the original v1/v2
+Tiny/Base generic/maternal checkpoints, trains the full C2/C3/C5/C6
+matrix, selects candidate Tiny models on common held-out synthetic probes,
+trains C4 distilled Tiny, and runs the complete frozen-draw C1/C4/new-model
+benchmark with official TabPFN v2 and classical comparisons.
+
+The new observed AUROC, Brier, calibration, and inference timing are
+written to `real_data_all_draws.csv` and `real_data_summary.csv` **only
+when the evaluation has actually run**. It fails rather than silently
+treating incomplete experiments as results. This is exploratory evaluation
+because original test cohorts informed v2 decisions.
+
+Your MacBook already has the previously used AWS profile
+`helpmum-training`, but this assistant's runtime does not have access
+to that profile or your private patient-free frozen dataset manifests.
+Run the following in your Mac terminal to **actually submit**:
+
+```bash
+cd ~/nanoMaternalPFN
+git fetch origin
+git switch research/c1-c6-improvements
+git pull --ff-only
+source .venv/bin/activate
+export AWS_PROFILE=helpmum-training
+python -m pip install "sagemaker>=2.230,<3" boto3
+python scripts/26_launch_complete_c1_c6.py
+```
+
+That final command has **no dry-run gate**. It performs AWS credential,
+input-dataset checksum, and checkpoint availability checks before paying
+for GPU. It then uploads the frozen input archive and submits one SageMaker
+`ml.g5.2xlarge` job with `wait=False`. The job is asynchronous on AWS;
+its output and checkpoints are stored under the **isolated**
+`s3://sagemaker-us-east-1-355119164071/nanomaternalpfn/c1-c6-complete/`
+prefix. The CLI prints the submitted SageMaker job name.
+
+### Run size and limits
+
+Full default: 80 independently trained Tiny models (2 prior versions ×
+5 mixture weights × 4 total step budgets × 2 feature encoders × 2 context
+normalizers), with 200,000 synthetic task records per prior-mixture
+replay. Followed by common held-out synthetic ranking, 25,000-step
+student distillation, and frozen real-data multi-method evaluation.
+Each independent budget is trained from scratch: total training optimizer
+updates = 16 × (2,500 + 5,000 + 10,000 + 25,000) = **680,000**.
+At effective batch size 32, that is **21,760,000 synthetic-task
+presentations**, plus 800,000 for 25,000-step distillation. All are
+replays with replacement, **not** 22.56 million distinct tasks.
+
+The launcher currently specifies 150 GB scratch volume and a 14-day
+SageMaker job time limit. This is a substantial **billable** commitment
+and is not guaranteed to finish within 14 days. A timeout or capacity
+failure may leave the job incomplete; partial training checkpoints
+persist in the project S3 checkpoint prefix. Neither completion nor
+clinical superiority is promised before actual AWS evidence exists.
+
+### Source artifacts required on Mac
+
+The launcher validates (and uploads) eight pairs of frozen
+`artifacts/manifests/<dataset>.json/.npz` files, four v1 best inference
+checkpoints under `artifacts/results/aws_full_pretrain/`, and four v2
+checkpoints under `artifacts/results/aws_v2_pretrain/`.
+The launcher refuses to claim completion if any of these inputs are missing
+or their checksums disagree. These source paths can be overridden using
+`--manifest-dir`, `--v1-dir`, and `--v2-dir`.
+
+The job does **not** reconstruct any missing public cohort files or guess
+their recorded outcomes, labels, or frozen split definitions. It does not
+require uploading any AWS secret to GitHub or ChatGPT.
