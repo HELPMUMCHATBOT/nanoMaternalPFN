@@ -145,3 +145,44 @@ python scripts/23_run_c1_c6_research.py \
 | C4 | Frozen-teacher distillation and standalone student checkpoint | Not yet clinically measured |
 | C5 | Independent budgeted training with synthetic validation | Not yet clinically measured |
 | C6 | Prior-mixture factorial comparisons (0–100% maternal) | Not yet clinically measured |
+
+
+## AWS SageMaker execution from the Mac
+
+The branch includes `sagemaker_research.py` and
+`scripts/25_submit_research_aws.py`: an opt-in SageMaker GPU launcher
+that copies only code (not local archives or virtualenvs), uses a dedicated
+S3 prefix, preserves checkpoints in `/opt/ml/checkpoints`, and writes
+measured results to SageMaker model artifacts. It does **not** launch an
+instance until `--submit` is provided.
+
+After checking out the branch, set the AWS profile and retrieve the role
+from the AWS CLI. Use an S3 bucket with appropriate IAM permissions:
+
+```bash
+cd ~/nanoMaternalPFN
+git fetch origin research/c1-c6-improvements
+git switch research/c1-c6-improvements
+python -m pip install -e '.[test]'
+python -m pip install 'sagemaker>=2.230,<3' boto3
+export AWS_PROFILE=helpmum-training
+
+ROLE_ARN="$(aws iam get-role --role-name SageMakerExecutionRole --query Role.Arn --output text)"
+BUCKET="YOUR_EXISTING_SAGEMAKER_BUCKET"
+
+# Preview complete experimental configuration without billing:
+python scripts/25_submit_research_aws.py --bucket "$BUCKET" --role-arn "$ROLE_ARN"
+
+# To actually allocate a billable GPU, add --submit explicitly:
+python scripts/25_submit_research_aws.py --bucket "$BUCKET" --role-arn "$ROLE_ARN" --submit
+```
+
+The full default 80-run matrix is likely to exceed one 24-hour SageMaker
+job limit, depending on measured hardware throughput. The launcher supports
+`--max-run-seconds`; stopped jobs can resume from the dedicated checkpoint
+prefix by submitting again with exactly the same matrix. Check actual
+GPU costs, quotas, role permissions, and instance capacity before `--submit`.
+
+**Do not interpret successful one-step CI smoke tests, synthetic held-out
+loss, or job submission as completed eight-task clinical AUROC evaluation.**
+Full model accuracy must be measured separately on frozen real-data tasks.
