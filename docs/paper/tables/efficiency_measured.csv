@@ -1,0 +1,28 @@
+method,context,runtime,fit_cv_p50_ms,query_p50_ms,query_p99_ms,combined_checkpoint_mb,repeats,model
+adaptive_tiny,16,PyTorch CPU,22.7002920583,5.66291622818,5.83781710826,2.898644,7,multi-expert
+adaptive_tiny_3expert,16,PyTorch CPU,31.9132078439,7.88575038314,8.30726186745,4.347998,7,multi-expert
+adaptive_tiny,64,PyTorch CPU,90.8819590695,12.0872086845,12.7202897053,2.898644,7,multi-expert
+adaptive_tiny_3expert,64,PyTorch CPU,130.579125136,17.7597496659,20.8193050791,4.347998,7,multi-expert
+adaptive_tiny,128,PyTorch CPU,264.13174998,19.0558331087,20.3977723327,2.898644,7,multi-expert
+adaptive_tiny_3expert,128,PyTorch CPU,396.551874932,25.3084586002,31.1510836706,4.347998,7,multi-expert
+standalone_tiny_mixture_onnx,16,ONNX CPU,,0.942728947848,0.965258805081,1.519938,100,standalone ONNX
+standalone_tiny_mixture_onnx,64,ONNX CPU,,2.64854135457,2.92349832831,1.522242,100,standalone ONNX
+standalone_tiny_mixture_onnx,128,ONNX CPU,,5.09770866483,5.85589047056,1.525318,100,standalone ONNX
+logistic,16,Baseline CPU,1.70462485403,0.350332818925,,,5,baseline
+random_forest,16,Baseline CPU,106.460249983,6.41970895231,,,5,baseline
+xgboost,16,Baseline CPU,5.61066600494,0.156250083819,,,5,baseline
+lightgbm,16,Baseline CPU,1.37616693974,0.266500050202,,,5,baseline
+tabpfn_v2_single,16,Baseline CPU,16.5773332119,21.3215001859,,,5,baseline
+tabpfn_v2_default,16,Baseline CPU,28.0325419735,138.11904192,,,5,baseline
+logistic,64,Baseline CPU,1.68079207651,0.331958057359,,,5,baseline
+random_forest,64,Baseline CPU,110.906041926,7.18266703188,,,5,baseline
+xgboost,64,Baseline CPU,8.2600840833,0.165165867656,,,5,baseline
+lightgbm,64,Baseline CPU,4.63612494059,0.276166014373,,,5,baseline
+tabpfn_v2_single,64,Baseline CPU,15.9918749705,58.366500074,,,5,baseline
+tabpfn_v2_default,64,Baseline CPU,28.4914171789,339.887124952,,,5,baseline
+logistic,128,Baseline CPU,1.65616720915,0.327792018652,,,5,baseline
+random_forest,128,Baseline CPU,118.304834003,7.19120888971,,,5,baseline
+xgboost,128,Baseline CPU,15.2716659941,0.175750115886,,,5,baseline
+lightgbm,128,Baseline CPU,7.92574998923,0.292708864436,,,5,baseline
+tabpfn_v2_single,128,Baseline CPU,15.9349997994,119.821208995,,,5,baseline
+tabpfn_v2_default,128,Baseline CPU,32.2516660672,714.984291,,,5,baseline

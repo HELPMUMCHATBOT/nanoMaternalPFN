@@ -1,0 +1,13 @@
+graph,context,onnx_file_mb,total_process_peak_rss_mb,incremental_peak_over_import_mb,meets_32mb_total_process_target
+artifacts/results/edge_v2/base_generic/v2_ctx128.onnx,128,11.174698,137.390625,90.828125,False
+artifacts/results/edge_v2/base_generic/v2_ctx16.onnx,16,11.169318,99.265625,51.578125,False
+artifacts/results/edge_v2/base_generic/v2_ctx64.onnx,64,11.171622,100.703125,53.71875,False
+artifacts/results/edge_v2/base_mixture/v2_ctx128.onnx,128,11.174698,126.296875,80.015625,False
+artifacts/results/edge_v2/base_mixture/v2_ctx16.onnx,16,11.169318,88.5,41.453125,False
+artifacts/results/edge_v2/base_mixture/v2_ctx64.onnx,64,11.171622,97.859375,50.5,False
+artifacts/results/edge_v2/tiny_generic/v2_ctx128.onnx,128,1.525318,83.1875,37.875,False
+artifacts/results/edge_v2/tiny_generic/v2_ctx16.onnx,16,1.519938,62.234375,16.3125,False
+artifacts/results/edge_v2/tiny_generic/v2_ctx64.onnx,64,1.522242,67.703125,22.09375,False
+artifacts/results/edge_v2/tiny_mixture/v2_ctx128.onnx,128,1.525318,80.1875,34.234375,False
+artifacts/results/edge_v2/tiny_mixture/v2_ctx16.onnx,16,1.519938,63.671875,17.390625,False
+artifacts/results/edge_v2/tiny_mixture/v2_ctx64.onnx,64,1.522242,71.359375,24.359375,False
