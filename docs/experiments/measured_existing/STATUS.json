@@ -1,0 +1,7 @@
+{
+  "E6": "retrospective_descriptive_completed_only",
+  "E7": "observed_generic_vs_mixture_comparison_completed_only",
+  "source_zip_sha256": "f67a41dab4d35b7cc09b9a0a353bbe09928833669ea9547678b804a973167a26",
+  "causal_ablation_complete": false,
+  "patient_level_data_available": false
+}
