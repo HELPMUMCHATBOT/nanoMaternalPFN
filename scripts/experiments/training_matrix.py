@@ -36,7 +36,7 @@ def case_command(case,out,device,python=sys.executable):
  '--output',str(Path(out)/case['id']),'--architecture',f['architecture'],
  '--schedule',f['schedule'],'--missingness-encoding',f['missingness_encoding'],
  '--maternal-probability',str(f['maternal_probability']),
- '--steps',str(f['steps']),'--device',device]
+ '--steps',str(f['steps']),'--device',device,'--resume']
  for k in ('class_augmentation','sign_augmentation'):
   cmd.append('--'+k.replace('_','-') if f[k] else '--no-'+k.replace('_','-'))
  return cmd

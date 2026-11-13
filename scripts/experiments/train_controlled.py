@@ -119,7 +119,28 @@ def train(args):
     mcfg=replace(TIERS[args.tier],architecture=args.architecture)
     model=NanoMaternalPFN(mcfg).to(args.device)
     optimizer=torch.optim.AdamW(model.parameters(),lr=args.peak_lr)
-    best=float('inf');best_step=None;history=[]
+    best=float('inf');best_step=None;history=[];start_step=0
+    resume_path=args.output/'resume_state.pt'
+    if args.resume and resume_path.is_file():
+        snapshot=torch.load(resume_path,map_location=args.device,weights_only=False)
+        if snapshot.get('config')!=cfg:
+            raise RuntimeError('Unsafe resume: controlled training configuration changed')
+        model.load_state_dict(snapshot['model'])
+        optimizer.load_state_dict(snapshot['optimizer'])
+        best=float(snapshot['best']);best_step=snapshot['best_step']
+        history=list(snapshot['validation_history']);start_step=int(snapshot['step'])
+        torch.set_rng_state(snapshot['torch_rng_state'])
+        if args.device=='cuda' and snapshot.get('cuda_rng_states') is not None:
+            torch.cuda.set_rng_state_all(snapshot['cuda_rng_states'])
+        if start_step>=args.steps:
+            raise RuntimeError('Training state reached target steps but COMPLETE.json is absent; audit the interrupted run')
+        print(f'RESUMING complete-budget training from {start_step}/{args.steps}',flush=True)
+    elif args.resume and spec.exists() and not (args.output/'best.inference.pt').exists():
+        # A fresh run with only its CONFIG.json is valid. Never infer that its
+        # pretraining has completed from the configuration alone.
+        pass
+    elif not args.resume and spec.exists() and (args.output/'best.inference.pt').exists():
+        raise RuntimeError('Interrupted experiment already exists; use --resume')
     def save_inference(path,step,loss,complete):
         from nanomaternalpfn.model import ModelConfig
         blob={'state_dict':model.state_dict(),'config':asdict(mcfg),
@@ -128,7 +149,7 @@ def train(args):
               'complete':complete,'factor_spec':cfg,
               'feature_mode':cfg['missingness_encoding']}
         torch.save(blob,path)
-    for step in range(1,args.steps+1):
+    for step in range(start_step+1,args.steps+1):
         model.train();optimizer.zero_grad(set_to_none=True)
         if args.schedule=='constant':lr=args.peak_lr
         elif args.schedule=='cosine':
@@ -152,8 +173,26 @@ def train(args):
             if step in args.save_steps:
                 save_inference(args.output/f'step{step}.inference.pt',step,val['validation_mean_loss'],complete=(step==args.steps))
             write_json(args.output/'synthetic_validation.json',history)
+            # Persist both weights and optimizer for an exact continuation.
+            # The task RNG is keyed by (seed, step, microbatch, item), so no
+            # synthetic draws are repeated after restoration.
+            snapshot={'config':cfg,'step':step,'model':model.state_dict(),
+                      'optimizer':optimizer.state_dict(),'best':best,
+                      'best_step':best_step,'validation_history':history,
+                      'torch_rng_state':torch.get_rng_state(),
+                      'cuda_rng_states':torch.cuda.get_rng_state_all() if args.device=='cuda' else None}
+            temporary=resume_path.with_suffix('.tmp')
+            torch.save(snapshot,temporary);temporary.replace(resume_path)
             print(f'SYNTHETIC TRAIN step={step}/{args.steps} val_loss={val["validation_mean_loss"]:.5f}',flush=True)
     save_inference(args.output/'final.inference.pt',args.steps,history[-1]['validation_mean_loss'],complete=True)
+    # The best-validation checkpoint may have been selected before the final
+    # optimization step. Its selection step is retained, but the metadata now
+    # also proves that the complete prescribed budget was run.
+    bestpath=args.output/'best.inference.pt'
+    finalbest=torch.load(bestpath,map_location='cpu',weights_only=True)
+    finalbest['full_budget_completed']=True
+    finalbest['total_training_steps']=args.steps
+    torch.save(finalbest,bestpath)
     write_json(args.output/'COMPLETE.json',{'steps_completed':args.steps,'best_synthetic_validation_step':best_step,
              'best_synthetic_validation_loss':best,'method':'controlled_synthetic_pretraining',
              'paper_results_produced':False,'requires_frozen_clinical_transfer':True,
@@ -178,6 +217,7 @@ def cli(argv=None):
  p.add_argument('--save-steps',nargs='*',type=int,default=[5000,10000,20000])
  p.add_argument('--peak-lr',type=float,default=5e-4)
  p.add_argument('--device',choices=('cuda','cpu','mps'),default='cuda')
+ p.add_argument('--resume',action='store_true',help='Resume exact optimizer state from prior checkpoint')
  a=p.parse_args(argv)
  train(a)
 

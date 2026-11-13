@@ -48,7 +48,7 @@ def thin_minority_context(indices,labels,fraction,seed):
 
 def _parse(a):
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--experiment',choices=('E1','E3','E5','E6','E8'),required=True)
+    p.add_argument('--experiment',choices=('E1','E2','E3','E5','E6','E7','E8','E11'),required=True)
     p.add_argument('--manifests',type=Path,nargs='+',required=True)
     p.add_argument('--v1-dir',type=Path,default=Path('artifacts/results/aws_full_pretrain'))
     p.add_argument('--v2-dir',type=Path,default=Path('artifacts/results/aws_v2_pretrain'))
@@ -70,8 +70,11 @@ def run(args):
     if args.n_search<1:raise ValueError('Positive tuning iterations only')
     methods=args.methods or ({'E1':['tiny_generic','tiny_mixture','tabpfn_v2_default'],
         'E3':list(CLASSICAL),'E5':['tiny_generic','tiny_mixture','tabpfn_v2_default'],
-        'E6':list(EXPERT_RULES),'E8':['tiny_generic','tiny_mixture','tabpfn_v2_default']}[args.experiment])
+        'E6':list(EXPERT_RULES),'E8':['tiny_generic','tiny_mixture','tabpfn_v2_default'],
+        'E2':[], 'E7':[], 'E11':[]}[args.experiment])
     custom_map=json.loads(args.checkpoint_map.read_text()) if args.checkpoint_map else {}
+    if args.experiment in ('E2','E7','E11') and (not methods or not custom_map):
+        raise ValueError('Controlled model evaluation requires trained checkpoints and explicit --methods')
     if any(not isinstance(name,str) or not isinstance(path,str) for name,path in custom_map.items()):
         raise ValueError('Checkpoint map must contain string names and paths')
     conditions=['clean','missing_0.10','missing_0.25','noise_0.10','noise_0.25','imbalance_minority_0.50'] if args.experiment=='E8' else ['clean']
@@ -88,6 +91,13 @@ def run(args):
     if journal.exists():
         for line in journal.read_text().splitlines():
             r=json.loads(line);done.add((r['dataset'],r['method'],r['context'],r['draw_seed'],r['condition']))
+    skipped_keys=set()
+    skipfile=args.output/'skipped.jsonl'
+    if skipfile.is_file():
+        for line in skipfile.read_text().splitlines():
+            record=json.loads(line)
+            skipped_keys.add((record['dataset'],record['method'],
+                              int(record['context']),int(record['draw_seed']),record['condition']))
     count=0
     for manifest in args.manifests:
         data=load_frozen(manifest,external=args.experiment=='E1')
@@ -101,6 +111,14 @@ def run(args):
                 labels=data.y[indices]
                 if len(np.unique(labels))<2:continue
                 for method in methods:
+                    if args.experiment=='E3' and method in CLASSICAL and min(np.unique(labels,return_counts=True)[1])<2:
+                        key=(data.name,method,budget,draw_seed,'clean')
+                        if key not in skipped_keys:
+                            jsonl_append(skipfile,{'dataset':data.name,'method':method,
+                                  'context':budget,'draw_seed':draw_seed,'condition':'clean',
+                                  'reason':'insufficient_context_labels_for_inner_cv'})
+                            skipped_keys.add(key)
+                        continue
                     if method in CLASSICAL:
                         model,info=tuned_baseline(method,data.x[indices],labels,args.seed+draw_seed,args.n_search) if args.experiment=='E3' else (build_classical(method,args.seed+draw_seed)[0],{'model':'baseline_fixed'})
                         if args.experiment!='E3':model.fit(data.x[indices],labels)
@@ -128,9 +146,11 @@ def run(args):
                             try:
                                 selected=thin_minority_context(indices,labels,.50,args.seed+1009*budget+draw_seed)
                             except ValueError:
-                                jsonl_append(args.output/'skipped.jsonl',{'dataset':data.name,'method':method,
-                                     'context':budget,'draw_seed':draw_seed,'condition':condition,
-                                     'reason':'too_few_minority_context_rows'})
+                                if key not in skipped_keys:
+                                    jsonl_append(skipfile,{'dataset':data.name,'method':method,
+                                         'context':budget,'draw_seed':draw_seed,'condition':condition,
+                                         'reason':'too_few_minority_context_rows'})
+                                    skipped_keys.add(key)
                                 continue
                             model.fit(data.x[selected],data.y[selected])
                             query=data.x[data.test]
@@ -141,7 +161,7 @@ def run(args):
                            'method':method,'context':budget,'draw_seed':draw_seed,
                            'condition':condition,'n_test':len(data.test),
                            'n_context_used':len(selected) if condition.startswith('imbalance_minority_') else len(indices),
-                           'metrics':metrics(data.y[data.test],probs),
+                           'metrics':metrics(data.y[data.test],probs,classes=all_classes),
                            'selection':info,'provenance':provenance(manifest,method,paths),
                            'diagnostic_draw_cap':args.max_draws is not None}
                         if args.save_predictions:

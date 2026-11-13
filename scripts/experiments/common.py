@@ -112,10 +112,14 @@ def aligned_probs(estimator, probs, classes):
     return out
 
 
-def metrics(y,p):
+def metrics(y,p,classes=None):
     from sklearn.metrics import accuracy_score,roc_auc_score
     from nanomaternalpfn.evaluation.calibration import multiclass_brier,ece
-    classes=np.unique(y)
+    classes=np.unique(y) if classes is None else np.asarray(classes)
+    if len(classes)!=p.shape[1]:
+        raise ValueError("Predictor classes do not align with metric classes")
+    if not np.isin(y,classes).all():
+        raise ValueError("Unexpected held-out target label")
     truth=np.searchsorted(classes,y)
     score={'accuracy':float(accuracy_score(truth,p.argmax(1))),
            'brier':float(multiclass_brier(truth,p)),

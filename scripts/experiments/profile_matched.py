@@ -29,8 +29,9 @@ def one_method(args):
  data=load_frozen(args.manifest)
  draws=data.contexts.get(str(args.context))
  if not draws:raise ValueError('Context not available for frozen task')
- indices=np.asarray(draws[0],dtype=int)
- if len(np.unique(data.y[indices]))<2:raise ValueError('First context has fewer than 2 classes')
+ indices=next((np.asarray(draw,dtype=int) for draw in draws
+               if len(np.unique(data.y[np.asarray(draw,dtype=int)]))>=2),None)
+ if indices is None:raise ValueError('No eligible two-class context exists for this budget')
  x,y=data.x[indices],data.y[indices]
  query=data.x[data.test[:1]]
  start=time.perf_counter()

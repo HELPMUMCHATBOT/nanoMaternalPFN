@@ -2,7 +2,47 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
+from sklearn.base import BaseEstimator, ClassifierMixin
 import numpy as np
+
+class ClassSafeXGBoost(ClassifierMixin, BaseEstimator):
+    """Explicitly encode arbitrary integer clinical target labels for XGB.
+
+    SearchCV calls fit only on labeled context folds; original class identities
+    are restored via classes_ for downstream alignment.
+    """
+    def __init__(self,n_estimators=200,max_depth=3,learning_rate=0.1,
+                 min_child_weight=1,reg_lambda=1,random_state=20261113):
+        self.n_estimators=n_estimators;self.max_depth=max_depth
+        self.learning_rate=learning_rate;self.min_child_weight=min_child_weight
+        self.reg_lambda=reg_lambda;self.random_state=random_state
+
+    def get_params(self,deep=True):
+        return {k:getattr(self,k) for k in ('n_estimators','max_depth','learning_rate',
+             'min_child_weight','reg_lambda','random_state')}
+
+    def set_params(self,**params):
+        for k,v in params.items():
+            if k not in self.get_params():raise ValueError('Unexpected XGB search parameter '+k)
+            setattr(self,k,v)
+        return self
+
+    def fit(self,x,y):
+        from xgboost import XGBClassifier
+        import numpy as np
+        self.classes_,encoded=np.unique(y,return_inverse=True)
+        if len(self.classes_)<2:raise ValueError('XGBoost requires two observed classes')
+        self.model_=XGBClassifier(n_estimators=self.n_estimators,max_depth=self.max_depth,
+             learning_rate=self.learning_rate,min_child_weight=self.min_child_weight,
+             reg_lambda=self.reg_lambda,random_state=self.random_state,n_jobs=1,
+             tree_method='hist',objective='binary:logistic' if len(self.classes_)==2 else 'multi:softprob',
+             eval_metric='logloss' if len(self.classes_)==2 else 'mlogloss',verbosity=0)
+        self.model_.fit(x,encoded)
+        return self
+
+    def predict_proba(self,x):return self.model_.predict_proba(x)
+    def predict(self,x):return self.classes_[self.predict_proba(x).argmax(axis=1)]
+
 
 CLASSICAL=('logistic','random_forest','xgboost','lightgbm')
 SINGLE=('tiny_generic','tiny_mixture','base_generic','base_mixture',
@@ -33,10 +73,8 @@ def build_classical(name,seed=20261113):
                  'est__max_depth':[3,6,None], 'est__min_samples_leaf':[1,3,8],
                  'est__max_features':['sqrt',.75]}
     if name=='xgboost':
-        from xgboost import XGBClassifier
         return Pipeline([('imp',SimpleImputer(add_indicator=True)),
-                ('est',XGBClassifier(n_estimators=200,tree_method='hist',random_state=seed,
-                  n_jobs=1,eval_metric='logloss',verbosity=0))]),{
+                ('est',ClassSafeXGBoost(random_state=seed))]),{
             'est__max_depth':[2,3,5], 'est__learning_rate':[.03,.1],
             'est__min_child_weight':[1,5], 'est__reg_lambda':[1,5]}
     if name=='lightgbm':
