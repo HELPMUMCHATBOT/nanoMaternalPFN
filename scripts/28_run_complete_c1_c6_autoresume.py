@@ -39,6 +39,59 @@ def current_commit():
     return p.stdout.strip()
 
 
+# Keep the training plan immutable even when we change only this local monitor.
+# The original code was staged into SageMaker at submission time.
+TRAINING_SOURCE_FILES=(
+    "sagemaker_research.py",
+    "requirements_benchmark.txt",
+    "scripts/19_submit_full_aws_benchmark.py",
+    "scripts/18_run_complete_benchmark.py",
+    "scripts/23_run_c1_c6_research.py",
+    "scripts/24_distill_tiny.py",
+    "scripts/26_launch_complete_c1_c6.py",
+    "src/nanomaternalpfn",
+)
+
+
+def training_source_unchanged(original_commit, current):
+    if original_commit == current:
+        return True
+    result = subprocess.run(
+        ["git", "diff", "--quiet", original_commit, current, "--",
+         *TRAINING_SOURCE_FILES],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    raise RuntimeError("Cannot verify training source history: " + result.stderr)
+
+
+def validate_resume_spec(previous, current):
+    if not isinstance(previous, dict):
+        raise ValueError("Missing saved SageMaker controller specification")
+    old_settings = {key:value for key,value in previous.items() if key!="git_commit"}
+    new_settings = {key:value for key,value in current.items() if key!="git_commit"}
+    if old_settings != new_settings:
+        raise ValueError("Cannot resume with changed AWS target or experiment settings")
+    old_commit=previous.get("git_commit")
+    if not old_commit:
+        raise ValueError("Saved training source commit is unknown")
+    if training_source_unchanged(old_commit, current["git_commit"]):
+        if old_commit != current["git_commit"]:
+            print("Monitoring after a controller-only update; original training code unchanged.",flush=True)
+        return True
+    print(
+        "Training source files changed since the original submission. "
+        "Will monitor the existing job but will NOT automatically start a job "
+        "using different experiment code.", flush=True,
+    )
+    return False
+
+
 def build_spec(args):
     if not 3600<=args.max_run_seconds<=432000:
         raise ValueError("account runtime quota: max-run-seconds <= 432000")
@@ -112,19 +165,37 @@ def submit(args,state,client):
     return job
 
 
-def describe_or_fail(client,name):
-    from botocore.exceptions import ClientError
-    try:
-        return client.describe_training_job(TrainingJobName=name)
-    except ClientError as exc:
-        if exc.response.get("Error",{}).get("Code") in (
-            "ValidationException","ResourceNotFound",
-        ):
-            raise RuntimeError(
-                "Pending job not found in SageMaker; inspect failed submission before restarting "
-                + name
-            ) from exc
-        raise
+def describe_or_fail(client,name,*,sleep=time.sleep):
+    from botocore.exceptions import (
+        ClientError, EndpointConnectionError, ConnectionClosedError,
+        ConnectTimeoutError, ReadTimeoutError,
+    )
+    # Transient DNS/network failures on the Mac are not SageMaker failures.
+    # Retry ONLY the status inquiry. Never submit a duplicate on a network error.
+    lost=0
+    while True:
+        try:
+            return client.describe_training_job(TrainingJobName=name)
+        except ClientError as exc:
+            if exc.response.get("Error",{}).get("Code") in (
+                "ValidationException","ResourceNotFound",
+            ):
+                raise RuntimeError(
+                    "Pending job not found in SageMaker; inspect failed submission before restarting "
+                    + name
+                ) from exc
+            raise
+        except (EndpointConnectionError, ConnectionClosedError,
+                ConnectTimeoutError, ReadTimeoutError) as exc:
+            lost+=1
+            delay=min(300,30*(2**min(lost-1,4)))
+            print(
+                f"Temporary local AWS network/DNS failure on status check "
+                f"({type(exc).__name__}); retrying in {delay}s. "
+                f"Existing SageMaker job {name} remains independent of this monitor. "
+                "NO new job submitted.",flush=True,
+            )
+            sleep(delay)
 
 
 def run(args,session=None,sleep=time.sleep):
@@ -135,10 +206,10 @@ def run(args,session=None,sleep=time.sleep):
     target=Path(args.state)
     if target.exists():
         state=json.loads(target.read_text())
-        if state.get("spec")!=spec:
-            raise ValueError("Cannot continue with changed branch, AWS target or experiment settings")
+        can_relaunch=validate_resume_spec(state.get("spec"),spec)
     else:
         state={"spec":spec,"jobs":[],"completed":False}
+        can_relaunch=True
         atomic_json(target,state)
     if state.get("completed"):
         print("Full C1-C6 research already marked complete; no new job submitted.")
@@ -151,7 +222,7 @@ def run(args,session=None,sleep=time.sleep):
 
     while True:
         job=state["jobs"][-1]
-        detail=describe_or_fail(client,job["name"])
+        detail=describe_or_fail(client,job["name"],sleep=sleep)
         primary,secondary,reason=status_details(detail)
         latest=(primary,secondary,reason)
         if job.get("last_observed")!=list(latest):
@@ -166,6 +237,13 @@ def run(args,session=None,sleep=time.sleep):
             print("FULL RESEARCH JOB COMPLETED:",job["name"],flush=True)
             return state
         if must_continue(detail):
+            if not can_relaunch:
+                raise RuntimeError(
+                    "AWS reached MaxRuntimeExceeded, but the local training source "
+                    "has changed. Check out original source commit "
+                    +state["spec"]["git_commit"]+
+                    " before continuing; no new billable job was submitted."
+                )
             job["status"]="MaxRuntimeExceeded"
             atomic_json(target,state)
             print("Five-day job limit reached. Continuing from S3 checkpoints.",flush=True)
