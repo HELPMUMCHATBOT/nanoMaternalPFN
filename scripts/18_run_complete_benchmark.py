@@ -37,8 +37,9 @@ METHODS = (
     "nanotabpfn_generic", "nanotabpfn_mixture",
     "tabpfn_v2_single", "tabpfn_v2_default",
     "tiny_generic", "tiny_mixture", "base_generic", "base_mixture",
-    *V1_ARMS, "adaptive_tiny", "adaptive_base",
+    *V1_ARMS, "adaptive_tiny", "adaptive_base", "distilled_tiny", "v3_selected_tiny",
 )
+RESEARCH_ADAPTIVE = tuple(f"adaptive_{tier}_{kind}" for tier in ("tiny", "base") for kind in ("three", "four"))
 RAW_FIELDS = (
     "dataset", "method", "context", "seed", "accuracy", "brier", "ece15",
     "auroc", "fit_ms", "predict_ms", "peak_gpu_allocated_mb",
@@ -79,6 +80,16 @@ def load_manifest(path):
 
 def make_estimator(method, root, device, seed, query_batch_size):
     ckpts = root / "checkpoints"
+    if method == "v3_selected_tiny":
+        return NanoMaternalPFNClassifier(
+            ckpts / "c2c3c5c6" / "v3_selected_tiny.best.inference.pt",
+            device=device, query_batch_size=query_batch_size,
+        )
+    if method == "distilled_tiny":
+        return NanoMaternalPFNClassifier(
+            ckpts / "c4" / "distilled_tiny.best.inference.pt",
+            device=device, query_batch_size=query_batch_size,
+        )
     if method in ("nanotabpfn_generic","nanotabpfn_mixture"):
         return NanoTabPFNReferenceClassifier(
             ckpts / f"{method}.best.inference.pt",
@@ -93,6 +104,19 @@ def make_estimator(method, root, device, seed, query_batch_size):
         return NanoMaternalPFNClassifier(
             ckpts / "v2" / f"{method}.best.inference.pt",
             device=device, query_batch_size=query_batch_size,
+        )
+    if method in RESEARCH_ADAPTIVE:
+        _, tier, kind = method.split("_")
+        paths = [
+            ckpts / "v1" / f"{tier}_mixture.best.inference.pt",
+            ckpts / "v2" / f"{tier}_mixture.best.inference.pt",
+            ckpts / "v2" / f"{tier}_generic.best.inference.pt",
+        ]
+        if kind == "four":
+            paths.append(ckpts / "v1" / f"{tier}_generic.best.inference.pt")
+        return AdaptiveNanoMaternalPFNClassifier(
+            paths, query_batch_size=query_batch_size, device=device,
+            cv_folds=4, calibrate=True,
         )
     if method.startswith("adaptive_"):
         tier = method.split("_", 1)[1]
@@ -195,7 +219,7 @@ def main():
     p.add_argument("--input-dir",type=Path,required=True)
     p.add_argument("--output-dir",type=Path,required=True)
     p.add_argument("--datasets",nargs="+",choices=DATASETS,default=list(DATASETS))
-    p.add_argument("--methods",nargs="+",choices=METHODS,default=list(METHODS))
+    p.add_argument("--methods",nargs="+",choices=METHODS+RESEARCH_ADAPTIVE,default=list(METHODS))
     p.add_argument("--contexts",nargs="+",type=int,default=[16,32,64,128,256,512])
     p.add_argument("--max-draws",type=int,default=None)
     p.add_argument("--device",choices=("cuda","cpu"),default="cuda")

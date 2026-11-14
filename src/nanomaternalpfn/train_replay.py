@@ -30,6 +30,7 @@ def train_replay(
     validation_path=None, validate_every=250, validation_batches_per_context=2,
     validation_batch_size=8, validation_seed=20271008,
     variant='v1', warmup_steps=250,
+    feature_encoder_type='linear', normalization='standard',
 ):
     """Train on a completed HDF5 replay; 'steps' is total desired steps.
 
@@ -39,12 +40,12 @@ def train_replay(
     torch.set_num_threads(min(4,torch.get_num_threads()))
     if tier not in TIERS:
         raise ValueError("Unknown model tier")
-    if variant not in ('v1', 'v2'):
+    if variant not in ('v1', 'v2', 'v3_robust'):
         raise ValueError("Unknown model variant")
     if warmup_steps < 0:
         raise ValueError("warmup_steps cannot be negative")
     peak_lr = float(lr) if lr is not None else (
-        (2e-4 if tier == 'base' else 5e-4) if variant == 'v2' else 5e-4
+        (2e-4 if tier == 'base' else 5e-4) if variant != 'v1' else 5e-4
     )
     if peak_lr <= 0:
         raise ValueError("learning rate must be positive")
@@ -67,7 +68,12 @@ def train_replay(
     torch.manual_seed(seed)
     rng=np.random.default_rng(seed)
     random.seed(seed)
-    cfg=replace(TIERS[tier],architecture=('pre_ln_v2' if variant=='v2' else 'post_ln_v1'))
+    cfg=replace(
+        TIERS[tier],
+        architecture=('pre_ln_v2' if variant!='v1' else 'post_ln_v1'),
+        feature_encoder_type=feature_encoder_type,
+        normalization=normalization,
+    )
     model=NanoMaternalPFN(cfg).to(device)
     optimizer=torch.optim.AdamW(model.parameters(),lr=peak_lr)
     start=0
@@ -84,6 +90,8 @@ def train_replay(
             raise ValueError("Cannot resume on a different model variant")
         old_config=dict(checkpoint["config"])
         old_config.setdefault("architecture","post_ln_v1")
+        old_config.setdefault("feature_encoder_type","linear")
+        old_config.setdefault("normalization","standard")
         if checkpoint["replay_sha256"]!=replay_hash or old_config!=asdict(cfg):
             raise ValueError("Cannot resume on different prior archive/model architecture")
         for field,value in (("seed",seed),("batch_size",batch_size),("lr",peak_lr),
@@ -96,7 +104,7 @@ def train_replay(
             raise ValueError("Cannot resume with a different microbatch_size")
         if checkpoint.get("variant", "v1") != variant:
             raise ValueError("Cannot resume on a different variant")
-        if variant == 'v2' and (checkpoint.get('warmup_steps') != warmup_steps or
+        if variant != 'v1' and (checkpoint.get('warmup_steps') != warmup_steps or
                                 checkpoint.get('schedule_total_steps') != steps):
             raise ValueError("Cannot resume on a different cosine schedule")
         if checkpoint.get("validation_sha256") != validation_hash:
@@ -129,7 +137,7 @@ def train_replay(
         if validation_replay is not None and validation_replay.settings.get('variant','v1') != variant:
             raise ValueError("Synthetic validation archive variant mismatch")
         for step in range(start+1,steps+1):
-            if variant == 'v2' and tier == 'base':
+            if variant != 'v1' and tier == 'base':
                 if warmup_steps and step <= warmup_steps:
                     factor = step / warmup_steps
                 else:
@@ -191,8 +199,8 @@ def train_replay(
                     "config":asdict(cfg),"tier":tier,
                     "seed":seed,"lr":peak_lr,"batch_size":batch_size,
                     "variant":variant,
-                    "warmup_steps":warmup_steps if variant=='v2' else 0,
-                    "schedule_total_steps":steps if variant=='v2' else None,
+                    "warmup_steps":warmup_steps if variant!='v1' else 0,
+                    "schedule_total_steps":steps if variant!='v1' else None,
                     "microbatch_size":microbatch_size,
                     "gradient_accumulation_steps":accumulation_steps,
                     "task_presentations":step*batch_size,
@@ -229,7 +237,7 @@ def train_replay(
                                 "effective_batch_size":batch_size},snapshot)
     report={
         "tier":tier,"variant":variant,
-        "peak_learning_rate":peak_lr,"warmup_steps":warmup_steps if variant=='v2' else 0,
+        "peak_learning_rate":peak_lr,"warmup_steps":warmup_steps if variant!='v1' else 0,
         "step":max(start,steps),"parameter_count":model.parameter_count(),
         "effective_batch_size":batch_size,"microbatch_size":microbatch_size,
         "gradient_accumulation_steps":accumulation_steps,
@@ -258,7 +266,9 @@ def main():
     p.add_argument("--microbatch-size",type=int,default=None,
                    help="Tasks per forward/backward; defaults to effective batch size")
     p.add_argument("--lr",type=float,default=None)
-    p.add_argument("--variant",choices=("v1","v2"),default="v1")
+    p.add_argument("--variant",choices=("v1","v2","v3_robust"),default="v1")
+    p.add_argument("--feature-encoder-type",choices=("linear","gated"),default="linear")
+    p.add_argument("--normalization",choices=("standard","robust"),default="standard")
     p.add_argument("--warmup-steps",type=int,default=250)
     p.add_argument("--device",default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--seed",type=int,default=20261107)
@@ -278,7 +288,9 @@ def main():
                         variant=a.variant,warmup_steps=a.warmup_steps,
                         validation_path=a.validation_replay,
                         validate_every=a.validate_every,
-                        validation_batches_per_context=a.validation_batches_per_context)
+                        validation_batches_per_context=a.validation_batches_per_context,
+                        feature_encoder_type=a.feature_encoder_type,
+                        normalization=a.normalization)
     print(json.dumps(report,indent=2))
 
 

@@ -1,0 +1,48 @@
+name: C1-C6 measured synthetic smoke
+on:
+  push:
+    branches:
+      - research/c1-c6-improvements
+  workflow_dispatch:
+
+jobs:
+  synthetic-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install research package
+        run: python -m pip install -e '.[test]'
+      - name: Run deterministic C2 C3 C5 C6 training smoke
+        run: |
+          python scripts/23_run_c1_c6_research.py \
+            --execute --smoke --device cpu \
+            --output artifacts/results/c1_c6_ci_smoke \
+            --variants v3_robust --maternal-fractions .7 \
+            --step-budgets 1 --encoders gated \
+            --normalizations robust \
+            --num-tables 20 --validation-tables 20 \
+            --batch-size 2 --microbatch-size 1 --validate-every 1
+      - name: Assert measured output, not projections
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('artifacts/results/c1_c6_ci_smoke/measured_results.json').read_text())
+          assert len(r)==1 and r[0]['completed_optimizer_steps']==1
+          assert r[0]['clinical_auroc_measured'] is False
+          assert r[0]['trajectory_total_elapsed_seconds_measured']>0
+          assert r[0]['heldout_synthetic_best_loss'] is not None
+          print(json.dumps(r[0], indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c1-c6-measured-synthetic-smoke
+          path: |
+            artifacts/results/c1_c6_ci_smoke/research_plan.json
+            artifacts/results/c1_c6_ci_smoke/measured_results.json
+            artifacts/results/c1_c6_ci_smoke/checkpoints/*.json
+          retention-days: 30
