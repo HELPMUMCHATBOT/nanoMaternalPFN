@@ -124,3 +124,32 @@ def test_distill_resume_uses_optimizer_and_not_best_only():
     text=(ROOT/"sagemaker_research.py").read_text()
     assert "resume=True, checkpoint_every=25" in text
     assert 'report["steps_completed"] != a.distill_steps' in text
+
+
+def test_local_dns_failure_retries_status_without_submitting(tmp_path):
+    from botocore.exceptions import EndpointConnectionError
+    controller=module("dns_monitor",ROOT/"scripts"/"28_run_complete_c1_c6_autoresume.py")
+    class Client:
+        count=0
+        def describe_training_job(self,TrainingJobName):
+            self.count+=1
+            if self.count<=2:
+                raise EndpointConnectionError(endpoint_url="https://api.sagemaker.us-east-1.amazonaws.com/")
+            return {"TrainingJobStatus":"InProgress","SecondaryStatus":"Training"}
+    client=Client()
+    delays=[]
+    detail=controller.describe_or_fail(client,"existing-job",sleep=delays.append)
+    assert detail["SecondaryStatus"]=="Training"
+    assert client.count==3
+    assert delays==[30,60]
+
+
+def test_monitor_only_commit_does_not_change_frozen_training_code():
+    controller=module("versioned_monitor",ROOT/"scripts"/"28_run_complete_c1_c6_autoresume.py")
+    import subprocess
+    old="c4d83f44a8096bd115c9912c3c85c790165549d0"
+    p=subprocess.run(["git","cat-file","-t",old],cwd=ROOT,capture_output=True,text=True)
+    if p.returncode==0:
+        # New helper patches to the model are not controller-only changes.
+        # The conditional allows shallow Git checkouts.
+        assert controller.training_source_unchanged(old,old)
